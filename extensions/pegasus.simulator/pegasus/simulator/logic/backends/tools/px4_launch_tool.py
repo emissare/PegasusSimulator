@@ -9,6 +9,10 @@
 import os
 import tempfile
 import subprocess
+import threading
+
+# Omniverse logging
+import carb
 
 
 class PX4LaunchTool:
@@ -32,6 +36,9 @@ class PX4LaunchTool:
         # The vehicle id (used for the mavlink port open in the system)
         self.vehicle_id = vehicle_id
 
+        # Flag to track if monitoring thread is running
+        self._monitoring = False
+
         # Configurations to whether autostart px4 (SITL) automatically or have the user launch it manually on another
         # terminal
         self.px4_dir = px4_dir
@@ -48,6 +55,8 @@ class PX4LaunchTool:
         """
         Method that will launch a px4 instance with the specified configuration
         """
+        carb.log_info(f"Launching PX4 SITL (Vehicle ID: {self.vehicle_id})")
+
         self.px4_process = subprocess.Popen(
             [
                 self.px4_dir + "/build/px4_sitl_default/bin/px4",
@@ -61,14 +70,91 @@ class PX4LaunchTool:
             cwd=self.root_fs.name,
             shell=False,
             env=self.environment,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
         )
+
+        # Start monitoring thread to capture and log PX4 output
+        self._monitoring = True
+        monitor_thread = threading.Thread(target=self._monitor_px4_output, daemon=True)
+        monitor_thread.start()
+
+        carb.log_info(f"PX4 SITL started (PID: {self.px4_process.pid})")
+
+    def _monitor_px4_output(self):
+        """Monitor PX4 process output and log to Isaac Sim console"""
+        carb.log_info("Starting PX4 output monitoring...")
+
+        try:
+            while self._monitoring and self.px4_process and self.px4_process.poll() is None:
+                try:
+                    line = self.px4_process.stdout.readline()
+                    if line:
+                        line = line.strip()
+                        if line:
+                            # Color-code different types of messages for better visibility
+                            if any(keyword in line.lower() for keyword in ['error', 'failed', 'illegal']):
+                                carb.log_error(f"PX4: {line}")
+                            elif any(keyword in line.lower() for keyword in ['warning', 'warn']):
+                                carb.log_warn(f"PX4: {line}")
+                            elif any(keyword in line.lower() for keyword in ['mavlink', 'udp', 'tcp', 'port', 'stream']):
+                                carb.log_info(f"📡 PX4: {line}")
+                            elif any(keyword in line.lower() for keyword in ['simulator', 'sih', 'sensors']):
+                                carb.log_info(f"🎮 PX4: {line}")
+                            elif any(keyword in line.lower() for keyword in ['startup', 'init', 'loading']):
+                                carb.log_info(f"🚀 PX4: {line}")
+                            else:
+                                carb.log_info(f"PX4: {line}")
+                    else:
+                        # No more output and process might have ended
+                        break
+                except Exception as e:
+                    carb.log_error(f"Error reading PX4 output line: {e}")
+                    break
+
+            # Process has ended, capture any remaining output
+            if self.px4_process and self.px4_process.poll() is not None:
+                carb.log_warn(f"PX4 process ended with code: {self.px4_process.poll()}")
+                try:
+                    # Read any remaining buffered output
+                    remaining_output = self.px4_process.stdout.read()
+                    if remaining_output:
+                        for line in remaining_output.split('\n'):
+                            line = line.strip()
+                            if line:
+                                carb.log_info(f"PX4 (final): {line}")
+                except Exception as e:
+                    carb.log_error(f"Error reading final PX4 output: {e}")
+
+        except Exception as e:
+            carb.log_error(f"Error monitoring PX4 output: {e}")
+
+        carb.log_info("PX4 output monitoring ended")
 
     def kill_px4(self):
         """
         Method that will kill a px4 instance with the specified configuration
         """
         if self.px4_process is not None:
-            self.px4_process.kill()
+            carb.log_info("Stopping PX4 SITL...")
+
+            # Stop monitoring thread
+            self._monitoring = False
+
+            try:
+                # Try graceful termination first
+                self.px4_process.terminate()
+                self.px4_process.wait(timeout=5)
+                carb.log_info("PX4 SITL stopped gracefully")
+            except subprocess.TimeoutExpired:
+                carb.log_warn("PX4 didn't stop gracefully, forcing kill")
+                self.px4_process.kill()
+                self.px4_process.wait()
+                carb.log_info("PX4 SITL force killed")
+            except Exception as e:
+                carb.log_error(f"Error stopping PX4: {e}")
+
             self.px4_process = None
 
     def __del__(self):
@@ -76,6 +162,9 @@ class PX4LaunchTool:
         If the px4 process is still running when the PX4 launch tool object is whiped from memory, then make sure
         we kill the px4 instance so we don't end up with hanged px4 instances
         """
+
+        # Stop monitoring thread
+        self._monitoring = False
 
         # Make sure the PX4 process gets killed
         if self.px4_process:

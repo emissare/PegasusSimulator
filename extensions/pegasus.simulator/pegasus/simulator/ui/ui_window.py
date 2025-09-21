@@ -16,7 +16,7 @@ import omni.ui as ui
 from omni.ui import color as cl
 
 from pegasus.simulator.ui.ui_delegate import UIDelegate
-from pegasus.simulator.params import ROBOTS, SIMULATION_ENVIRONMENTS, THUMBNAIL, BACKENDS, WORLD_THUMBNAIL, WINDOW_TITLE, BACKENDS_THUMBMAILS
+from pegasus.simulator.params import ROBOTS, SIMULATION_ENVIRONMENTS, THUMBNAIL, WORLD_THUMBNAIL, WINDOW_TITLE
 
 
 class WidgetWindow(ui.Window):
@@ -92,14 +92,14 @@ class WidgetWindow(ui.Window):
 
                 # Vertical Stack of menus
                 with ui.VStack():
-                    # Create a frame for selecting which backend to load
-                    self._backend_selection_frame()
+                    # Create a frame for configuring PX4 settings
+                    self._px4_configuration_frame()
                     ui.Spacer(height=5)
 
                     # Create a frame for selecting which scene to load
                     self._scene_selection_frame()
                     ui.Spacer(height=5)
-                    
+
                     # Create a frame for selecting which vehicle to load in the simulation environment
                     self._robot_selection_frame()
                     ui.Spacer(height=5)
@@ -114,7 +114,7 @@ class WidgetWindow(ui.Window):
         """
 
         # Frame for selecting the simulation environment to load
-        with ui.CollapsableFrame("Scene Selection"):
+        with ui.CollapsableFrame("Environment Selection"):
             with ui.VStack(height=0, spacing=10, name="frame_v_stack"):
                 ui.Spacer(height=WidgetWindow.GENERAL_SPACING)
 
@@ -178,19 +178,19 @@ class WidgetWindow(ui.Window):
                     ui.Spacer(width=WidgetWindow.GENERAL_SPACING)
 
                     with ui.VStack():
-                        # Button for loading a desired scene
+                        # Button for loading environment only
                         ui.Button(
-                            "Load Scene",
+                            "Load Environment",
                             height=WidgetWindow.BUTTON_HEIGHT,
-                            clicked_fn=self._delegate.on_load_scene,
+                            clicked_fn=self._delegate.on_load_environment,
                             style=WidgetWindow.BUTTON_BASE_STYLE,
                         )
 
-                        # Button to reset the stage
+                        # Button to save environment only
                         ui.Button(
-                            "Clear Scene",
+                            "Save Environment",
                             height=WidgetWindow.BUTTON_HEIGHT,
-                            clicked_fn=self._delegate.on_clear_scene,
+                            clicked_fn=self._delegate.on_save_environment,
                             style=WidgetWindow.BUTTON_BASE_STYLE,
                         )
 
@@ -228,6 +228,12 @@ class WidgetWindow(ui.Window):
                                 dropdown_menu.model.append_child_item(None, ui.SimpleStringModel(robot))
                             self._delegate.set_vehicle_dropdown(dropdown_menu.model)
 
+                            # Store reference to the dropdown for refreshing
+                            self._vehicle_dropdown_menu = dropdown_menu
+
+                            # Add refresh button
+                            ui.Button("↻", width=25, height=25, clicked_fn=self._refresh_vehicles, tooltip="Refresh vehicle list")
+
                         with ui.HStack():
                             ui.Label("Vehicle ID", name="label", width=WidgetWindow.LABEL_PADDING, alignment=ui.Alignment.TOP)
                             vehicle_id_field = ui.IntField()
@@ -237,192 +243,48 @@ class WidgetWindow(ui.Window):
                     # Add a frame transform to select the position of where to place the selected robot in the world
                     self._transform_frame()
                 
-                # Button to load the drone
-                ui.Button(
-                    "Load Vehicle",
-                    height=WidgetWindow.BUTTON_HEIGHT,
-                    clicked_fn=self._delegate.on_load_vehicle,
-                    style=WidgetWindow.BUTTON_BASE_STYLE,
-                )
+                # Buttons to load and save the vehicle
+                with ui.HStack():
+                    ui.Button(
+                        "Load Vehicle",
+                        height=WidgetWindow.BUTTON_HEIGHT,
+                        clicked_fn=self._delegate.on_load_vehicle,
+                        style=WidgetWindow.BUTTON_BASE_STYLE,
+                    )
+                    ui.Button(
+                        "Save Vehicle",
+                        height=WidgetWindow.BUTTON_HEIGHT,
+                        clicked_fn=self._delegate.on_save_vehicle,
+                        style=WidgetWindow.BUTTON_BASE_STYLE,
+                    )
 
-    def _backend_selection_frame(self):
+    def _px4_configuration_frame(self):
         """
-        A helper function to create a frame for selecting the streaming backend.
-        It creates a collapsible frame with a title, and inside it, a vertical stack of UI elements.
-        The UI elements include a thumbnail of the backend logo, three buttons to choose between PX4, ArduPilot, and ROS 2,
-        and two collapsible frames for configuring PX4 and ArduPilot settings.
+        A helper function to create a frame for configuring PX4 settings.
         """
-        
-        # Auxiliary function to handle the "switch behaviour" of the buttons that are used to choose between backends
-        def handle_backend_switch(
-            self,
-            px4_button,
-            ardupilot_button,
-            ros2_button,
-            button,
-            logo_image,
-            px4_menu=None,
-            ardupilot_menu=None
-        ):
-            # Handle the UI of both buttons switching of and on (To make it prettier)
-            if button == BACKENDS['px4']:
-                px4_button.enabled = False
-                ardupilot_button.enabled = True
-                ros2_button.enabled = True
-                
-                px4_button.set_style(WidgetWindow.BUTTON_SELECTED_STYLE)
-                ardupilot_button.set_style(WidgetWindow.BUTTON_BASE_STYLE)
-                ros2_button.set_style(WidgetWindow.BUTTON_BASE_STYLE)
-
-                px4_menu.enabled = True
-                px4_menu.visible = True
-                ardupilot_menu.enabled = False
-                ardupilot_menu.visible = False
-                
-
-            elif button == BACKENDS['ardupilot']:
-                px4_button.enabled = True
-                ardupilot_button.enabled = False
-                ros2_button.enabled = True
-
-                px4_button.set_style(WidgetWindow.BUTTON_BASE_STYLE)
-                ardupilot_button.set_style(WidgetWindow.BUTTON_SELECTED_STYLE)
-                ros2_button.set_style(WidgetWindow.BUTTON_BASE_STYLE)
-
-                px4_menu.enabled = False
-                px4_menu.visible = False
-                ardupilot_menu.enabled = True
-                ardupilot_menu.visible = True
-
-            else:
-                # ROS2
-                px4_button.enabled = True
-                ardupilot_button.enabled = True
-                ros2_button.enabled = False
-
-                px4_button.set_style(WidgetWindow.BUTTON_BASE_STYLE)
-                ardupilot_button.set_style(WidgetWindow.BUTTON_BASE_STYLE)
-                ros2_button.set_style(WidgetWindow.BUTTON_SELECTED_STYLE)
-
-                # TODO: Add ros2 menu
-                px4_menu.enabled = False
-                px4_menu.visible = False
-                ardupilot_menu.enabled = False
-                ardupilot_menu.visible = False
-            
-            logo_image.source_url = BACKENDS_THUMBMAILS[button]
-
-            # Handle the logic of switching between the two operating modes
-            self._delegate.set_streaming_backend(button)
-
-        with ui.CollapsableFrame(title="Streaming Backend"):
-            ui.Spacer(height=0)
+        with ui.CollapsableFrame(title="PX4 Configuration"):
             with ui.VStack(height=0, spacing=10, name="frame_v_stack"):
                 ui.Spacer(height=WidgetWindow.GENERAL_SPACING)
-                
-                # Thumbnail of backend logo
                 with ui.HStack():
-                    with ui.ZStack(width=WidgetWindow.LABEL_PADDING):
-                        ui.Rectangle(
-                            alignment=ui.Alignment.CENTER,
-                            width=200,
-                            height=WidgetWindow.BUTTON_HEIGHT * 3, # Match height of 3 backend buttons
-                        )
-                        logo_image = ui.Image(
-                            BACKENDS_THUMBMAILS["px4"],
-                            fill_policy=ui.FillPolicy.PRESERVE_ASPECT_FIT,
-                            alignment=ui.Alignment.CENTER,
-                        )
+                    ui.Label("Auto-launch PX4", name="label", width=WidgetWindow.LABEL_PADDING - 20)
+                    px4_checkbox = ui.CheckBox()
+                    px4_checkbox.model.set_value(self._delegate._autostart_px4)
+                    self._delegate.set_px4_autostart_checkbox(px4_checkbox.model)
 
-                    with ui.VStack():
-                        # Buttons that behave like switches to choose which network interface to use to simulate the control of the vehicle
-                        px4_button = ui.Button(
-                            "PX4",
-                            height=WidgetWindow.BUTTON_HEIGHT,
-                            style=WidgetWindow.BUTTON_SELECTED_STYLE,
-                            enabled=True,
-                            visible=True
-                        )
-                        ardupilot_button = ui.Button(
-                            "ArduPilot",
-                            height=WidgetWindow.BUTTON_HEIGHT,
-                            style=WidgetWindow.BUTTON_BASE_STYLE,
-                            enabled=True,
-                            visible=True
-                        )
-                        ros2_button = ui.Button(
-                            "ROS 2",
-                            height=WidgetWindow.BUTTON_HEIGHT,
-                            style=WidgetWindow.BUTTON_BASE_STYLE,
-                            enabled=True,
-                            visible=True
-                        )
-              
-                px4_menu = ui.CollapsableFrame("PX4 Configurations", collapsed=False)
-                ardupilot_menu = ui.CollapsableFrame("Ardupilot Configurations", collapsed=False)
+                with ui.HStack():
+                    ui.Label("PX4 Path", name="label", width=WidgetWindow.LABEL_PADDING - 20)
+                    px4_path_field = ui.StringField(name="px4_path", width=300)
+                    px4_path_field.model.set_value(self._delegate._px4_dir)
+                    self._delegate.set_px4_directory_field(px4_path_field.model)
 
-                # Set the auxiliary function to handle the switch between both backends
-                px4_button.set_clicked_fn(lambda: handle_backend_switch(
-                    self, px4_button, ardupilot_button, ros2_button, BACKENDS["px4"], logo_image, px4_menu, ardupilot_menu)
-                )
-                ardupilot_button.set_clicked_fn(lambda: handle_backend_switch(
-                    self, px4_button, ardupilot_button, ros2_button, BACKENDS["ardupilot"], logo_image, px4_menu, ardupilot_menu)
-                )
-                ros2_button.set_clicked_fn(lambda: handle_backend_switch(
-                    self, px4_button, ardupilot_button, ros2_button, BACKENDS["ros2"], logo_image, px4_menu, ardupilot_menu)
-                )
-        
-                # UI to configure the PX4 settings
-                with px4_menu:
-                    with ui.VStack(height=0, spacing=10, name="frame_v_stack"):
-                        ui.Spacer(height=WidgetWindow.GENERAL_SPACING)
-                        with ui.HStack():
-                            ui.Label("Auto-launch PX4", name="label", width=WidgetWindow.LABEL_PADDING - 20)
-                            px4_checkbox = ui.CheckBox()
-                            px4_checkbox.model.set_value(self._delegate._autostart_px4)
-                            self._delegate.set_px4_autostart_checkbox(px4_checkbox.model)
+                    ui.Button("Reset", enabled=True, clicked_fn=self._delegate.on_reset_px4_path)
+                    ui.Button("Make Default", enabled=True, clicked_fn=self._delegate.on_set_new_default_px4_path)
 
-                        with ui.HStack():
-                            ui.Label("PX4 Path", name="label", width=WidgetWindow.LABEL_PADDING - 20)
-                            px4_path_field = ui.StringField(name="px4_path", width=300)
-                            px4_path_field.model.set_value(self._delegate._px4_dir)
-                            self._delegate.set_px4_directory_field(px4_path_field.model)
-
-                            ui.Button("Reset", enabled=True, clicked_fn=self._delegate.on_reset_px4_path)
-                            ui.Button("Make Default", enabled=True, clicked_fn=self._delegate.on_set_new_default_px4_path)
-
-                        with ui.HStack():
-                            ui.Label("PX4 airframe", name="label", width=WidgetWindow.LABEL_PADDING - 20)
-                            px4_airframe_field = ui.StringField(name="px4_model")
-                            px4_airframe_field.model.set_value(self._delegate._px4_airframe)
-                            self._delegate.set_px4_airframe_field(px4_airframe_field.model)
-
-                # UI to configure the Ardupilot settings
-                with ardupilot_menu:
-                    with ui.VStack(height=0, spacing=10, name="frame_v_stack"):
-                        ui.Spacer(height=WidgetWindow.GENERAL_SPACING)
-                        with ui.HStack():
-                            ui.Label("Auto-launch Ardupilot", name="label", width=WidgetWindow.LABEL_PADDING + 10)
-                            ardupilot_checkbox = ui.CheckBox()
-                            ardupilot_checkbox.model.set_value(self._delegate._autostart_ardupilot)
-                            self._delegate.set_ardupilot_autostart_checkbox(ardupilot_checkbox.model)
-
-                        with ui.HStack():
-                            ui.Label("ArduPilot Path", name="label", width=WidgetWindow.LABEL_PADDING - 20)
-                            ardupilot_path_field = ui.StringField(name="ardupilot_path", width=300)
-                            ardupilot_path_field.model.set_value(self._delegate._ardupilot_dir)
-                            self._delegate.set_ardupilot_directory_field(ardupilot_path_field.model)
-
-                            ui.Button("Reset", enabled=True, clicked_fn=self._delegate.on_reset_ardupilot_path)
-                            ui.Button("Make Default", enabled=True, clicked_fn=self._delegate.on_set_new_default_ardupilot_path)
-
-                        with ui.HStack():
-                            ui.Label("ArduPilot airframe", name="label", width=WidgetWindow.LABEL_PADDING)
-                            ardupilot_airframe_field = ui.StringField(name="ardupilot_model")
-                            ardupilot_airframe_field.model.set_value(self._delegate._ardupilot_airframe)
-                            self._delegate.set_ardupilot_airframe_field(ardupilot_airframe_field.model)
-                
-                ardupilot_menu.visible = False # Only px4 menu is visible at initialization
+                with ui.HStack():
+                    ui.Label("PX4 airframe", name="label", width=WidgetWindow.LABEL_PADDING - 20)
+                    px4_airframe_field = ui.StringField(name="px4_model")
+                    px4_airframe_field.model.set_value(self._delegate._px4_airframe)
+                    self._delegate.set_px4_airframe_field(px4_airframe_field.model)
 
     def _viewport_camera_frame(self):
         """
@@ -575,3 +437,25 @@ class WidgetWindow(ui.Window):
             return camera_pos, camera_target
 
         return None, None
+
+    def _refresh_vehicles(self):
+        """
+        Method to refresh the vehicle dropdown by rescanning the assets directory
+        """
+        # Import here to avoid circular imports
+        from pegasus.simulator.params import refresh_robots
+
+        # Refresh the robots dictionary
+        updated_robots = refresh_robots()
+
+        # Clear the current dropdown items
+        self._vehicle_dropdown_menu.model.clear()
+
+        # Repopulate with new items
+        for robot in updated_robots:
+            self._vehicle_dropdown_menu.model.append_child_item(None, ui.SimpleStringModel(robot))
+
+        # Update the delegate's vehicles names list
+        self._delegate._vehicles_names = list(updated_robots.keys())
+
+        carb.log_info(f"Vehicle list refreshed: found {len(updated_robots)} vehicles")

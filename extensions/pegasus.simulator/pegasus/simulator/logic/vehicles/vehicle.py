@@ -98,7 +98,24 @@ class Vehicle(Robot):
 
         # Add this object for the world to track, so that if we clear the world, this object is deleted from memory and
         # as a consequence, from the VehicleManager as well
-        self._world.scene.add(self)
+        try:
+            self._world.scene.add(self)
+        except Exception as e:
+            if "name is not unique" in str(e):
+                carb.log_warn(f"Vehicle {self._stage_prefix} already exists in scene, reusing existing entry")
+                # Remove the existing entry and try again
+                try:
+                    # Try to find and remove the existing object
+                    for obj in self._world.scene._scene_registry:
+                        if hasattr(obj, 'name') and obj.name == self._stage_prefix:
+                            self._world.scene._scene_registry.remove(obj)
+                            break
+                    # Now add this new one
+                    self._world.scene.add(self)
+                except:
+                    carb.log_error(f"Failed to resolve scene conflict for {self._stage_prefix}, continuing anyway")
+            else:
+                raise e
 
         # Add the current vehicle to the vehicle manager, so that it knows
         # that a vehicle was instantiated

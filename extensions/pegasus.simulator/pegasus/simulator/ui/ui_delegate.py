@@ -8,28 +8,25 @@
 # External packages
 import os
 import asyncio
+import tempfile
 from scipy.spatial.transform import Rotation
 
 # Omniverse extensions
 import carb
 import omni.ui as ui
+import omni.usd
+import omni.kit.window.file_exporter
+from pxr import Usd, Sdf
 
 # Extension Configurations
-from pegasus.simulator.params import ROBOTS, SIMULATION_ENVIRONMENTS, BACKENDS, WORLD_SETTINGS
+from pegasus.simulator.params import ROBOTS, SIMULATION_ENVIRONMENTS, WORLD_SETTINGS, ASSET_PATH
 from pegasus.simulator.logic.interface.pegasus_interface import PegasusInterface
 
 # Vehicle Manager to spawn Vehicles
-from pegasus.simulator.logic.backends import Backend, BackendConfig, PX4MavlinkBackend, PX4MavlinkBackendConfig, ArduPilotMavlinkBackend, ArduPilotMavlinkBackendConfig
+from pegasus.simulator.logic.backends import PX4MavlinkBackend, PX4MavlinkBackendConfig
 from pegasus.simulator.logic.vehicles.multirotor import Multirotor, MultirotorConfig
 from pegasus.simulator.logic.vehicle_manager import VehicleManager
 from pegasus.simulator.logic.graphical_sensors.monocular_camera import MonocularCamera
-
-try:
-    from pegasus.simulator.logic.backends import ROS2Backend
-    ROS2_available = True
-except ImportError:
-    ROS2_available = False
-    carb.log_warn("ROS2 backend not available. Please install the ROS2 extension to use this feature.")
 
 
 class UIDelegate:
@@ -64,10 +61,6 @@ class UIDelegate:
         # Get an instance of the vehicle manager
         self._vehicle_manager = VehicleManager()
 
-        # Selected option for broadcasting the simulated vehicle (PX4+ROS2 or just ROS2)
-        # By default we assume PX4
-        self._streaming_backend: str = BACKENDS['px4']
-
         # Selected value for the the id of the vehicle
         self._vehicle_id_field: ui.AbstractValueModel = None
         self._vehicle_id: int = 0
@@ -83,18 +76,6 @@ class UIDelegate:
         # Atributes to store the PX4 airframe
         self._px4_airframe_field: ui.AbstractValueModel = None
         self._px4_airframe: str = self._pegasus_sim.px4_default_airframe
-
-        # Attribute that will save the model for the ardupilot-autostart checkbox
-        self._ardupilot_autostart_checkbox: ui.AbstractValueModel = None
-        self._autostart_ardupilot: bool = True
-
-        # Atributes to store the path for the ArduPilot directory
-        self._ardupilot_directory_field: ui.AbstractValueModel = None
-        self._ardupilot_dir: str = PegasusInterface().ardupilot_path
-
-        # Atributes to store the ArduPilot airframe
-        self._ardupilot_airframe_field: ui.AbstractValueModel = None
-        self._ardupilot_airframe: str = self._pegasus_sim.ardupilot_default_airframe
 
     def set_window_bind(self, window):
         self._window = window
@@ -117,9 +98,6 @@ class UIDelegate:
     def set_vehicle_id_field(self, vehicle_id_field: ui.AbstractValueModel):
         self._vehicle_id_field = vehicle_id_field
 
-    def set_streaming_backend(self, backend: str = BACKENDS['px4']):
-        self._streaming_backend = backend
-
     def set_px4_autostart_checkbox(self, checkbox_model:ui.AbstractValueModel):
         self._px4_autostart_checkbox = checkbox_model
 
@@ -128,15 +106,6 @@ class UIDelegate:
 
     def set_px4_airframe_field(self, airframe_field_model: ui.AbstractValueModel):
         self._px4_airframe_field = airframe_field_model
-    
-    def set_ardupilot_autostart_checkbox(self, checkbox_model: ui.AbstractValueModel):
-        self._ardupilot_autostart_checkbox = checkbox_model
-
-    def set_ardupilot_directory_field(self, directory_field_model: ui.AbstractValueModel):
-        self._ardupilot_directory_field = directory_field_model
-
-    def set_ardupilot_airframe_field(self, airframe_field_model: ui.AbstractValueModel):
-        self._ardupilot_airframe_field = airframe_field_model
 
     """
     ---------------------------------------------------------------------
@@ -144,22 +113,22 @@ class UIDelegate:
     ---------------------------------------------------------------------
     """
 
-    def on_load_scene(self):
+    def on_load_environment(self):
         """
-        Method that should be invoked when the button to load the selected world is pressed
+        Method that should be invoked when the button to load the selected environment is pressed
         """
 
-        # Check if a scene is selected in the drop-down menu
+        # Check if an environment is selected in the drop-down menu
         if self._scene_dropdown is not None:
 
             # Get the id of the selected environment from the list
-            environemnt_index = self._scene_dropdown.get_item_value_model().as_int
+            environment_index = self._scene_dropdown.get_item_value_model().as_int
 
             # Get the name of the selected world
-            selected_world = self._scene_names[environemnt_index]
-            
+            selected_world = self._scene_names[environment_index]
+
             # Try to spawn the selected world
-            self._pegasus_sim.set_world_settings(**WORLD_SETTINGS[self._streaming_backend])
+            self._pegasus_sim.set_world_settings(**WORLD_SETTINGS['px4'])
             asyncio.ensure_future(self._pegasus_sim.load_environment_async(SIMULATION_ENVIRONMENTS[selected_world], force_clear=True))
 
     def on_set_new_global_coordinates(self):
@@ -224,71 +193,79 @@ class UIDelegate:
 
                 # Get the desired position and orientation of the vehicle from the UI transform
                 pos, euler_angles = self._window.get_selected_vehicle_attitude()
-                
-                backend_config: BackendConfig = None
-                backend: Backend = None
 
-                if self._streaming_backend == BACKENDS["px4"]:
-                    # Read if we should auto-start px4 from the checkbox
-                    px4_autostart = self._px4_autostart_checkbox.get_value_as_bool()
+                # Create PX4 backend (only backend supported)
+                # Read if we should auto-start px4 from the checkbox
+                px4_autostart = self._px4_autostart_checkbox.get_value_as_bool()
 
-                    # Read the PX4 path from the field
-                    px4_path = os.path.expanduser(self._px4_directory_field.get_value_as_string())
+                # Read the PX4 path from the field
+                px4_path = os.path.expanduser(self._px4_directory_field.get_value_as_string())
 
-                    # Read the PX4 airframe from the field
-                    px4_airframe = self._px4_airframe_field.get_value_as_string()
+                # Read the PX4 airframe from the field
+                px4_airframe = self._px4_airframe_field.get_value_as_string()
 
-                    backend_config = PX4MavlinkBackendConfig({
-                        "vehicle_id": self._vehicle_id,
-                        "px4_autolaunch": px4_autostart,
-                        "px4_dir": px4_path,
-                        "px4_vehicle_model": px4_airframe
-                    })
-                    backend = PX4MavlinkBackend(config=backend_config)
-                    carb.log_warn("PX4 backend selected.")
-                
-                elif self._streaming_backend == BACKENDS["ardupilot"]:
-                    # # Read if we should auto-start ardupilot from the checkbox
-                    ardupilot_autostart = self._ardupilot_autostart_checkbox.get_value_as_bool()
-
-                    # Read the ArduPilot path from the field
-                    ardupilot_path = os.path.expanduser(self._ardupilot_directory_field.get_value_as_string())
-
-                    # Read the ArduPilot airframe from the field
-                    ardupilot_airframe = self._ardupilot_airframe_field.get_value_as_string()
-
-                    backend_config = ArduPilotMavlinkBackendConfig({
-                        "vehicle_id": self._vehicle_id,
-                        "ardupilot_autolaunch": ardupilot_autostart,
-                        "ardupilot_dir": ardupilot_path,
-                        "ardupilot_vehicle_model": ardupilot_airframe
-                    })
-                    backend = ArduPilotMavlinkBackend(config=backend_config)
-                    carb.log_warn("Ardupilot backend selected.")
-                
-                elif self._streaming_backend == BACKENDS["ros2"]:    
-                    if ROS2_available:
-                        backend = ROS2Backend(vehicle_id=self._vehicle_id, config={
-                            "namespace": 'drone',
-                            "pub_sensors": True,
-                            "pub_graphical_sensors": True,
-                            "pub_state": True,
-                            "pub_tf": False,
-                            "sub_control": True}
-                            )
-                        carb.log_warn("ROS2 backend selected.")
-                    else:
-                        carb.log_warn("ROS2 not available. Please run Isaac Sim with ROS 2 extension correctly enabled.")
-                        return
-                else:
-                    carb.log_warn("Invalid backend selected. Not spawning the vehicle.")
-                    return
+                backend_config = PX4MavlinkBackendConfig({
+                    "vehicle_id": self._vehicle_id,
+                    "px4_autolaunch": px4_autostart,
+                    "px4_dir": px4_path,
+                    "px4_vehicle_model": px4_airframe
+                })
+                backend = PX4MavlinkBackend(config=backend_config)
                    
                 # Create the multirotor configuration
                 config_multirotor = MultirotorConfig()
                 config_multirotor.backends = [backend]
                 config_multirotor.graphical_sensors = [MonocularCamera("camera", config={"update_rate": 60.0})]
-                
+
+                # Clean up any existing vehicle before loading a new one
+                vehicle_path = "/World/quadrotor"
+
+                # Clear all callbacks for the vehicle path to prevent conflicts
+                callback_paths = [
+                    f"{vehicle_path}/state",
+                    f"{vehicle_path}/update",
+                    f"{vehicle_path}/start_stop_sim",
+                    f"{vehicle_path}/Sensors",
+                    f"{vehicle_path}/GraphicalSensors",
+                    f"{vehicle_path}/mav_state"
+                ]
+
+                carb.log_info(f"Clearing callbacks for {vehicle_path}")
+                for callback_path in callback_paths:
+                    try:
+                        self._pegasus_sim.world.remove_physics_callback(callback_path)
+                    except Exception as e:
+                        carb.log_info(f"Physics callback {callback_path} not found or already removed: {e}")
+
+                    try:
+                        self._pegasus_sim.world.remove_render_callback(callback_path)
+                    except Exception as e:
+                        carb.log_info(f"Render callback {callback_path} not found or already removed: {e}")
+
+                    try:
+                        self._pegasus_sim.world.remove_timeline_callback(callback_path)
+                    except Exception as e:
+                        carb.log_info(f"Timeline callback {callback_path} not found or already removed: {e}")
+
+                # Check if vehicle exists in VehicleManager and clean it up
+                existing_vehicle = self._vehicle_manager.get_vehicle(vehicle_path)
+                if existing_vehicle:
+                    carb.log_info(f"Removing existing vehicle at {vehicle_path}")
+                    # Remove from Isaac Sim scene first
+                    self._pegasus_sim.world.scene.remove_object(existing_vehicle)
+                    # Remove from VehicleManager
+                    self._vehicle_manager.remove_vehicle(vehicle_path)
+                    # Delete the vehicle object
+                    del existing_vehicle
+
+                # Check if prim exists in stage and remove it
+                stage = omni.usd.get_context().get_stage()
+                if stage:
+                    existing_prim = stage.GetPrimAtPath(vehicle_path)
+                    if existing_prim and existing_prim.IsValid():
+                        carb.log_info(f"Removing existing prim at {vehicle_path}")
+                        stage.RemovePrim(vehicle_path)
+
                 # Try to spawn the selected robot in the world to the specified namespace
                 Multirotor(
                     "/World/quadrotor",
@@ -343,21 +320,183 @@ class UIDelegate:
         carb.log_warn("Reseting the path to the default one")
         self._px4_directory_field.set_value(self._pegasus_sim.px4_path)
 
-    def on_set_new_default_ardupilot_path(self):
+    def on_save_environment(self):
         """
-        Method that will try to update the new ArduPilot autopilot path with whatever is passed on the string field
+        Method to save the current environment (everything except vehicle at /World/quadrotor)
         """
-        carb.log_warn("A new default ArduPilot Path will be set for the extension.")
+        # Get the current stage
+        stage = omni.usd.get_context().get_stage()
+        if not stage:
+            carb.log_error("No stage available to save")
+            return
 
-        # Read the current path from the field
-        path = self._ardupilot_directory_field.get_value_as_string()
+        # Get save path from user
+        file_exporter = omni.kit.window.file_exporter.get_file_exporter()
 
-        # Set the path using the pegasus interface
-        self._pegasus_sim.set_ardupilot_path(path)
+        def save_environment_callback(filename: str, dirname: str, extension: str = "", selections: list = []) -> None:
+            if not filename:
+                return
 
-    def on_reset_ardupilot_path(self):
+            filepath = os.path.join(dirname, filename)
+            if not filepath.endswith('.usd'):
+                filepath += '.usd'
+
+            try:
+                # Solution B1: Use stage.Export() method for proper USD handling
+
+                # Create a temporary file for exporting the flattened stage
+                with tempfile.NamedTemporaryFile(suffix='.usd', delete=False) as temp_file:
+                    temp_filepath = temp_file.name
+
+                carb.log_info(f"Creating temporary flattened stage at: {temp_filepath}")
+
+                # Export the entire flattened stage to temp file
+                stage.Export(temp_filepath, addSourceFileComment=False)
+
+                # Open the temp file as a new stage
+                temp_stage = Usd.Stage.Open(temp_filepath)
+                if not temp_stage:
+                    raise Exception("Failed to open temporary flattened stage")
+
+                # Create a new stage for export
+                export_stage = Usd.Stage.CreateNew(filepath)
+
+                # Copy all prims except the vehicle at /World/quadrotor
+                VEHICLE_PATH = "/World/quadrotor"
+
+                for prim in temp_stage.Traverse():
+                    prim_path = str(prim.GetPath())
+
+                    # Skip vehicle and its children
+                    if prim_path.startswith(VEHICLE_PATH):
+                        continue
+
+                    # Create the prim in export stage
+                    export_prim = export_stage.DefinePrim(prim.GetPath(), prim.GetTypeName())
+
+                    # Copy all attributes (which are now flattened/composed)
+                    for attr in prim.GetAttributes():
+                        if attr.HasAuthoredValue():
+                            export_attr = export_prim.CreateAttribute(attr.GetName(), attr.GetTypeName())
+                            export_attr.Set(attr.Get())
+
+                    # Copy relationships
+                    for rel in prim.GetRelationships():
+                        if rel.HasAuthoredTargets():
+                            export_rel = export_prim.CreateRelationship(rel.GetName())
+                            export_rel.SetTargets(rel.GetTargets())
+
+                export_stage.Save()
+                carb.log_info(f"Environment saved to: {filepath}")
+
+                # Clean up temporary file
+                try:
+                    os.unlink(temp_filepath)
+                    carb.log_info(f"Cleaned up temporary file: {temp_filepath}")
+                except Exception as cleanup_error:
+                    carb.log_warn(f"Failed to clean up temporary file {temp_filepath}: {cleanup_error}")
+
+            except Exception as e:
+                carb.log_error(f"Failed to save environment: {str(e)}")
+
+        file_exporter.show_window(
+            title="Save Environment",
+            export_button_label="Save",
+            export_handler=save_environment_callback,
+            filename_url=os.path.join(ASSET_PATH, "Worlds", "environment.usd")
+        )
+
+    def on_save_vehicle(self):
         """
-        Method that will reset the string field to the default ArduPilot path
+        Method to save only the vehicle at /World/quadrotor
         """
-        carb.log_warn("Reseting the path to the default one")
-        self._ardupilot_directory_field.set_value(self._pegasus_sim.ardupilot_path)
+        # Get the current stage
+        stage = omni.usd.get_context().get_stage()
+        if not stage:
+            carb.log_error("No stage available to save")
+            return
+
+        # Check if vehicle exists
+        VEHICLE_PATH = "/World/quadrotor"
+        vehicle_prim = stage.GetPrimAtPath(VEHICLE_PATH)
+
+        if not vehicle_prim or not vehicle_prim.IsValid():
+            carb.log_error(f"No vehicle found at {VEHICLE_PATH}")
+            return
+
+        # Get save path from user
+        file_exporter = omni.kit.window.file_exporter.get_file_exporter()
+
+        def save_vehicle_callback(filename: str, dirname: str, extension: str = "", selections: list = []) -> None:
+            if not filename:
+                return
+
+            filepath = os.path.join(dirname, filename)
+            if not filepath.endswith('.usd'):
+                filepath += '.usd'
+
+            try:
+                # Solution B1: Use stage.Export() method for proper USD handling
+
+                # Create a temporary file for exporting the flattened stage
+                with tempfile.NamedTemporaryFile(suffix='.usd', delete=False) as temp_file:
+                    temp_filepath = temp_file.name
+
+                carb.log_info(f"Creating temporary flattened stage at: {temp_filepath}")
+
+                # Export the entire flattened stage to temp file
+                stage.Export(temp_filepath, addSourceFileComment=False)
+
+                # Open the temp file as a new stage
+                temp_stage = Usd.Stage.Open(temp_filepath)
+                if not temp_stage:
+                    raise Exception("Failed to open temporary flattened stage")
+
+                # Create a new stage for the final export
+                export_stage = Usd.Stage.CreateNew(filepath)
+
+                # Get the vehicle prim from the flattened temp stage
+                flattened_vehicle = temp_stage.GetPrimAtPath(VEHICLE_PATH)
+
+                if flattened_vehicle and flattened_vehicle.IsValid():
+                    carb.log_info(f"Copying vehicle subtree from {VEHICLE_PATH}")
+                    # Copy the entire flattened vehicle subtree
+                    for prim in Usd.PrimRange(flattened_vehicle):
+                        prim_path = prim.GetPath()
+
+                        # Create the prim in export stage
+                        export_prim = export_stage.DefinePrim(prim_path, prim.GetTypeName())
+
+                        # Copy all attributes (which are now flattened/composed)
+                        for attr in prim.GetAttributes():
+                            if attr.HasAuthoredValue():
+                                export_attr = export_prim.CreateAttribute(attr.GetName(), attr.GetTypeName())
+                                export_attr.Set(attr.Get())
+
+                        # Copy relationships
+                        for rel in prim.GetRelationships():
+                            if rel.HasAuthoredTargets():
+                                export_rel = export_prim.CreateRelationship(rel.GetName())
+                                export_rel.SetTargets(rel.GetTargets())
+                else:
+                    raise Exception(f"Vehicle prim not found at {VEHICLE_PATH} in flattened stage")
+
+                export_stage.Save()
+                carb.log_info(f"Vehicle saved to: {filepath}")
+
+                # Clean up temporary file
+                try:
+                    os.unlink(temp_filepath)
+                    carb.log_info(f"Cleaned up temporary file: {temp_filepath}")
+                except Exception as cleanup_error:
+                    carb.log_warn(f"Failed to clean up temporary file {temp_filepath}: {cleanup_error}")
+
+            except Exception as e:
+                carb.log_error(f"Failed to save vehicle: {str(e)}")
+
+        file_exporter.show_window(
+            title="Save Vehicle",
+            export_button_label="Save",
+            export_handler=save_vehicle_callback,
+            filename_url=os.path.join(ASSET_PATH, "Robots", "vehicle.usd")
+        )

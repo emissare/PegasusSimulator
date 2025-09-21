@@ -6,6 +6,7 @@
 """
 import os
 from pathlib import Path
+import glob
 
 import isaacsim.storage.native as nucleus
 
@@ -27,8 +28,22 @@ CONFIG_FILE = ROOT + "/pegasus.simulator/config/configs.yaml"
 ASSET_PATH = ROOT + "/pegasus.simulator/pegasus/simulator/assets"
 ROBOTS_ASSETS = ASSET_PATH + "/Robots"
 
-# Define the built in robots of the extension
-ROBOTS = {"Iris": ROBOTS_ASSETS + "/Iris/iris.usd"} #, "Flying Cube": ROBOTS_ASSETS + "/iris_cube.usda"}
+# Function to refresh robots list
+def refresh_robots():
+    """Refresh the ROBOTS dictionary by scanning the assets directory"""
+    global ROBOTS
+    ROBOTS = {}
+    if os.path.exists(ROBOTS_ASSETS):
+        # Find all .usd and .usda files
+        for file_path in glob.glob(os.path.join(ROBOTS_ASSETS, "**/*.usd*"), recursive=True):
+            # Get the filename without extension as the display name
+            filename = os.path.basename(file_path)
+            name = os.path.splitext(filename)[0]
+            ROBOTS[name] = file_path
+    return ROBOTS
+
+# Dynamically scan for robots/vehicles
+ROBOTS = refresh_robots()
 
 # Setup the default simulation environments path
 NVIDIA_ASSETS_PATH = str(nucleus.get_assets_root_path())
@@ -54,6 +69,16 @@ OMNIVERSE_ENVIRONMENTS = {
     "Exhibition Hall": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/4.5/NVIDIA/Assets/Scenes/Templates/Interior/ZetCG_ExhibitionHall.usd"
 }
 
+# Dynamically scan for local environments
+LOCAL_ENVIRONMENTS = {}
+worlds_path = ASSET_PATH + "/Worlds"
+if os.path.exists(worlds_path):
+    # Find all .usd and .usda files
+    for file_path in glob.glob(os.path.join(worlds_path, "**/*.usd*"), recursive=True):
+        # Get the filename without extension as the display name
+        filename = os.path.basename(file_path)
+        name = os.path.splitext(filename)[0]
+        LOCAL_ENVIRONMENTS[name] = file_path
 
 SIMULATION_ENVIRONMENTS = {}
 
@@ -67,27 +92,17 @@ for asset in NVIDIA_SIMULATION_ENVIRONMENTS:
 for asset in OMNIVERSE_ENVIRONMENTS:
     SIMULATION_ENVIRONMENTS[asset] = OMNIVERSE_ENVIRONMENTS[asset]
 
+# Add the local assets to the list
+for asset in LOCAL_ENVIRONMENTS:
+    SIMULATION_ENVIRONMENTS[asset] = LOCAL_ENVIRONMENTS[asset]
+
 BACKENDS = {
-    "px4": "px4",
-    "ardupilot": "ardupilot",
-    "ros2": "ros2"
+    "px4": "px4"
 }
 
 # Define the default settings for the simulation environment
 WORLD_SETTINGS = {
     'px4': {
-        "physics_dt": 1.0 / 250.0,
-        "stage_units_in_meters": 1.0,
-        "rendering_dt": 1.0 / 60.0,
-        "device": "cpu"
-    },
-    'ardupilot': {
-        "physics_dt": 1.0 / 800.0, # Reach communication of 250hz with ardupilot sitl
-        "stage_units_in_meters": 1.0,
-        "rendering_dt": 1.0 / 100.0,
-        "device": "cpu"
-    },
-    'ros2': {
         "physics_dt": 1.0 / 250.0,
         "stage_units_in_meters": 1.0,
         "rendering_dt": 1.0 / 60.0,
@@ -102,9 +117,3 @@ THUMBNAIL = ROBOTS_ASSETS + "/Iris/iris_thumbnail.png"
 # Define where the thumbail of the world is located
 WORLD_THUMBNAIL = ASSET_PATH + "/Worlds/Empty_thumbnail.png"
 
-BACKENDS_THUMBMAILS_PATH = ASSET_PATH + "/Backends"
-BACKENDS_THUMBMAILS = {
-    "px4": BACKENDS_THUMBMAILS_PATH + "/px4_logo.png",
-    "ardupilot": BACKENDS_THUMBMAILS_PATH + "/ardupilot_logo.png",
-    "ros2": BACKENDS_THUMBMAILS_PATH + "/ros2_logo.png"
-}
