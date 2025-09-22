@@ -24,6 +24,7 @@ from omni.isaac.dynamic_control import _dynamic_control
 from pegasus.simulator.logic.state import State
 from pegasus.simulator.logic.interface.pegasus_interface import PegasusInterface
 from pegasus.simulator.logic.vehicle_manager import VehicleManager
+from pegasus.simulator.logic.force_generators import ForceGenerator, SpinningBody, LiftingSurface
 
 
 def get_world_transform_xform(prim: Usd.Prim):
@@ -184,6 +185,20 @@ class Vehicle(Robot):
         # Add a callbacks for the
         self._world.add_physics_callback(self._stage_prefix + "/mav_state", self.update_sim_state)
 
+        # ===============================================================
+        # ---- Component Registry for Standardized Access ----
+        # ===============================================================
+
+        # Initialize component registry for type-safe access to vehicle parts
+        self._component_paths = {}
+
+        # ===============================================================
+        # ---- Force Generator System for Accurate Physics ----
+        # ===============================================================
+
+        # Initialize force generator system
+        self.components = {}  # Dictionary of all force-generating components {index: component}
+
 
     def __del__(self):
         """
@@ -216,6 +231,231 @@ class Vehicle(Robot):
             Vehicle name (str): last prim name in vehicle prim path
         """
         return self._vehicle_name
+
+    # ===============================================================
+    # ---- Component Access Interface ----
+    # ===============================================================
+
+    @property
+    def body_path(self) -> str:
+        """Get path to primary vehicle body (rigid body).
+
+        Standard: All vehicles MUST have their primary rigid body at /[vehicle]/body/body_mesh.
+        This follows the Pegasus structure where body is an Xform container with a mesh child that has physics.
+
+        Returns:
+            str: Path to primary vehicle body rigid body (e.g., "/quadrotor/body/body_mesh")
+        """
+        return f"{self._stage_prefix}/body/body_mesh"
+
+    @property
+    def relative_body_path(self) -> str:
+        """Get relative path to primary vehicle body from stage prefix.
+
+        This is the path expected by apply_force() and apply_torque() methods,
+        which prefix it with self._stage_prefix.
+
+        Returns:
+            str: Relative path to body (e.g., "/body/body_mesh")
+        """
+        return "/body/body_mesh"
+
+    @property
+    def root_path(self) -> str:
+        """Get path to vehicle root.
+
+        Returns:
+            str: Path to vehicle root (e.g., "/quadrotor")
+        """
+        return self._stage_prefix
+
+    def register_component(self, name: str, path: str):
+        """Register a component path for standardized access.
+
+        This allows subclasses to register their specific components
+        (rotors, wings, control surfaces, etc.) for type-safe access.
+
+        Args:
+            name (str): Component name (e.g., "rotor0", "left_wing")
+            path (str): Full path to component (e.g., "/quadrotor/body/rotor0")
+        """
+        self._component_paths[name] = path
+
+    def get_component_path(self, component_name: str) -> str:
+        """Get path to named component.
+
+        Args:
+            component_name (str): Name of component to look up
+
+        Returns:
+            str: Path to component or None if not found
+        """
+        return self._component_paths.get(component_name)
+
+    def get_registered_components(self) -> dict:
+        """Get all registered components.
+
+        Returns:
+            dict: Dictionary of component_name -> path
+        """
+        return self._component_paths.copy()
+
+    def get_body_rigid(self):
+        """Get the primary body rigid body handle.
+
+        Returns:
+            Rigid body handle for the primary vehicle body
+        """
+        return self.get_dc_interface().get_rigid_body(self.body_path)
+
+    def get_component_rigid(self, component_name: str):
+        """Get rigid body handle for named component.
+
+        Args:
+            component_name (str): Name of component
+
+        Returns:
+            Rigid body handle or None if component not found
+        """
+        path = self.get_component_path(component_name)
+        if path:
+            return self.get_dc_interface().get_rigid_body(path)
+        return None
+
+    # ===============================================================
+    # ---- Force Generator System ----
+    # ===============================================================
+
+    def add_spinning_body(self, index: int, position: list, thrust_coefficient: float,
+                         torque_coefficient: float, spin_direction: int) -> int:
+        """
+        Add a motor-driven rotor that generates thrust force and reaction torque.
+
+        Args:
+            index (int): Explicit index for this component
+            position (list): Position relative to body center [x, y, z]
+            thrust_coefficient (float): Thrust per (angular velocity)²
+            torque_coefficient (float): Motor torque per (angular velocity)²
+            spin_direction (int): +1 for clockwise, -1 for counter-clockwise
+
+        Returns:
+            int: Index of the added generator (for reference in control inputs)
+        """
+        if index in self.components:
+            raise ValueError(f"Component index {index} already in use")
+
+        import numpy as np
+        generator = SpinningBody(
+            position=np.array(position),
+            thrust_coefficient=thrust_coefficient,
+            torque_coefficient=torque_coefficient,
+            spin_direction=spin_direction
+        )
+        self.components[index] = generator
+        return index
+
+    def add_lifting_surface(self, index: int, position: list, lift_coefficient: float,
+                           lift_direction: list = [0, 0, 1]) -> int:
+        """
+        Add a lifting surface that generates only aerodynamic forces.
+
+        Args:
+            index (int): Explicit index for this component
+            position (list): Position relative to body center [x, y, z]
+            lift_coefficient (float): Lift force per unit deflection angle
+            lift_direction (list): Unit vector for lift direction (default: +Z)
+
+        Returns:
+            int: Index of the added generator (for reference in control inputs)
+        """
+        if index in self.components:
+            raise ValueError(f"Component index {index} already in use")
+
+        import numpy as np
+        generator = LiftingSurface(
+            position=np.array(position),
+            lift_coefficient=lift_coefficient,
+            lift_direction=np.array(lift_direction)
+        )
+        self.components[index] = generator
+        return index
+
+    def apply_forces(self, inputs: dict, dt: float = 1.0/60.0):
+        """
+        Apply forces and torques from components based on input dictionary.
+
+        This is the core physics method that applies forces at specific positions
+        to create natural moments. Isaac Sim automatically calculates the resulting
+        pitch and roll moments from force position offsets.
+
+        Args:
+            inputs (dict): Control inputs keyed by component index
+                          {index: input_value} where input_value is RPM, deflection, etc.
+            dt (float): Delta time for visual rotation animation
+        """
+        import numpy as np
+        import carb
+        from pegasus.simulator.logic.force_generators import SpinningBody, LiftingSurface
+
+        for index, input_value in inputs.items():
+            if index not in self.components:
+                continue
+
+            component = self.components[index]
+
+            # Type-specific behavior
+            if isinstance(component, SpinningBody):
+                # Calculate and apply spinning body forces/torques
+                force, torque = component.get_force_and_torque(input_value)
+
+                # Apply forces to the rotor's physics rigid body (not the main body)
+                rotor_physics_path = f"/body/rotor{index}/rotor_physics"
+
+                if np.any(force):
+                    self.apply_force(
+                        force.tolist(),
+                        pos=[0.0, 0.0, 0.0],  # Apply at center of rotor physics body
+                        body_part=rotor_physics_path
+                    )
+
+                if np.any(torque):
+                    self.apply_torque(
+                        torque.tolist(),
+                        body_part=rotor_physics_path
+                    )
+
+                # Update visual rotation
+                component.update_visual_rotation(input_value, dt)
+
+            elif isinstance(component, LiftingSurface):
+                # Calculate and apply lift forces
+                force, _ = component.get_force_and_torque(input_value)
+
+                if np.any(force):
+                    # TODO: Consider orientation/airspeed for realistic lift
+                    self.apply_force(
+                        force.tolist(),
+                        pos=component.position.tolist(),
+                        body_part=self.relative_body_path
+                    )
+
+    def get_components(self) -> dict:
+        """
+        Get dictionary of all registered components.
+
+        Returns:
+            dict: Dictionary of {index: component} pairs
+        """
+        return self.components.copy()
+
+    def get_component_count(self) -> int:
+        """
+        Get the number of registered components.
+
+        Returns:
+            int: Number of components
+        """
+        return len(self.components)
 
     """
     Operations
@@ -271,7 +511,7 @@ class Vehicle(Robot):
     def apply_force(self, force, pos=[0.0, 0.0, 0.0], body_part="/body"):
         """
         Method that will apply a force on the rigidbody, on the part specified in the 'body_part' at its relative position
-        given by 'pos' (following a FLU) convention. 
+        given by 'pos' (following a FLU) convention.
 
         Args:
             force (list): A 3-dimensional vector of floats with the force [Fx, Fy, Fz] on the body axis of the vehicle according to a FLU convention.
@@ -282,8 +522,9 @@ class Vehicle(Robot):
         # Get the handle of the rigidbody that we will apply the force to
         rb = self.get_dc_interface().get_rigid_body(self._stage_prefix + body_part)
 
-        # Apply the force to the rigidbody. The force should be expressed in the rigidbody frame
-        self.get_dc_interface().apply_body_force(rb, carb._carb.Float3(force), carb._carb.Float3(pos), False)
+        if rb:
+            # Apply the force to the rigidbody. The force should be expressed in the rigidbody frame
+            self.get_dc_interface().apply_body_force(rb, carb._carb.Float3(force), carb._carb.Float3(pos), False)
 
     def apply_torque(self, torque, body_part="/body"):
         """
@@ -297,8 +538,9 @@ class Vehicle(Robot):
         # Get the handle of the rigidbody that we will apply a torque to
         rb = self.get_dc_interface().get_rigid_body(self._stage_prefix + body_part)
 
-        # Apply the torque to the rigidbody. The torque should be expressed in the rigidbody frame
-        self.get_dc_interface().apply_body_torque(rb, carb._carb.Float3(torque), False)
+        if rb:
+            # Apply the torque to the rigidbody. The torque should be expressed in the rigidbody frame
+            self.get_dc_interface().apply_body_torque(rb, carb._carb.Float3(torque), False)
 
     def update_state(self, dt: float):
         """
@@ -310,13 +552,13 @@ class Vehicle(Robot):
         """
 
         # Get the body frame interface of the vehicle (this will be the frame used to get the position, orientation, etc.)
-        body = self.get_dc_interface().get_rigid_body(self._stage_prefix + "/body")
+        body = self.get_dc_interface().get_rigid_body(self.body_path)
 
         # Get the current position and orientation in the inertial frame
         pose = self.get_dc_interface().get_rigid_body_pose(body)
 
         # Get the attitude according to the convention [w, x, y, z]
-        prim = self._world.stage.GetPrimAtPath(self._stage_prefix + "/body")
+        prim = self._world.stage.GetPrimAtPath(self.body_path)
         rotation_quat = get_world_transform_xform(prim).GetQuaternion()
         rotation_quat_real = rotation_quat.GetReal()
         rotation_quat_img = rotation_quat.GetImaginary()

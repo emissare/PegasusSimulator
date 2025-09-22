@@ -22,7 +22,7 @@ class QuadraticThrustCurve(ThrustCurve):
 
             >>> {"num_rotors": 4,
             >>>  "rotor_constant": [5.84e-6, 5.84e-6, 5.84e-6, 5.84e-6],
-            >>>  "rolling_moment_coefficient": [1e-6, 1e-6, 1e-6, 1e-6],
+            >>>  "torque_coefficient": [1e-6, 1e-6, 1e-6, 1e-6],
             >>>  "rot_dir": [-1, -1, 1, 1],
             >>>  "min_rotor_velocity": [0, 0, 0, 0],                      # rad/s
             >>>  "max_rotor_velocity": [1100, 1100, 1100, 1100],          # rad/s
@@ -37,8 +37,8 @@ class QuadraticThrustCurve(ThrustCurve):
         assert len(self._rotor_constant) == self._num_rotors
 
         # The rotor constant used for computing the total torque generated about the vehicle Z-axis
-        self._rolling_moment_coefficient = config.get("rolling_moment_coefficient", [1e-6, 1e-6, 1e-6, 1e-6])
-        assert len(self._rolling_moment_coefficient) == self._num_rotors
+        self._torque_coefficient = config.get("torque_coefficient", [1e-6, 1e-6, 1e-6, 1e-6])
+        assert len(self._torque_coefficient) == self._num_rotors
 
         # Save the rotor direction of rotation
         self._rot_dir = config.get("rot_dir", [-1, -1, 1, 1])
@@ -60,8 +60,8 @@ class QuadraticThrustCurve(ThrustCurve):
         # The actual force that each rotor is generating
         self._force = [0.0 for i in range(self._num_rotors)]
 
-        # The actual rolling moment that is generated on the body frame of the vehicle
-        self._rolling_moment = 0.0
+        # The actual reaction torque that is generated on the body frame of the vehicle
+        self._reaction_torque = 0.0
 
     def set_input_reference(self, input_reference):
         """
@@ -82,7 +82,7 @@ class QuadraticThrustCurve(ThrustCurve):
             dt (float): The time elapsed between the previous and current function calls (s).
         """
 
-        rolling_moment = 0.0
+        reaction_torque = 0.0
 
         # Compute the actual force to apply to the rotors and the rolling moment contribution
         for i in range(self._num_rotors):
@@ -96,14 +96,14 @@ class QuadraticThrustCurve(ThrustCurve):
             # Set the force using a quadratic thrust curve
             self._force[i] = self._rotor_constant[i] * np.power(self._velocity[i], 2)
 
-            # Compute the rolling moment coefficient
-            rolling_moment += self._rolling_moment_coefficient[i] * np.power(self._velocity[i], 2.0) * self._rot_dir[i]
+            # Compute the reaction torque coefficient
+            reaction_torque += self._torque_coefficient[i] * np.power(self._velocity[i], 2.0) * self._rot_dir[i]
 
-        # Update the rolling moment variable
-        self._rolling_moment = rolling_moment
+        # Update the reaction torque variable
+        self._reaction_torque = reaction_torque
 
         # Return the forces and velocities on each rotor and total torque applied on the body frame
-        return self._force, self._velocity, self._rolling_moment
+        return self._force, self._velocity, self._reaction_torque
 
     @property
     def force(self):
@@ -124,13 +124,13 @@ class QuadraticThrustCurve(ThrustCurve):
         return self._velocity
 
     @property
-    def rolling_moment(self):
-        """The total rolling moment being generated on the body frame of the vehicle by the rotating propellers
+    def reaction_torque(self):
+        """The total motor reaction torque being generated on the body frame of the vehicle by the motors
 
         Returns:
-            float: The total rolling moment to apply to the vehicle body frame (Torque about the Z-axis) in Nm
+            float: The total reaction torque to apply to the vehicle body frame (Torque about the Z-axis) in Nm
         """
-        return self._rolling_moment
+        return self._reaction_torque
 
     @property
     def rot_dir(self):

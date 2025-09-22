@@ -11,8 +11,8 @@ import glob
 import isaacsim.storage.native as nucleus
 
 # Extension configuration
-EXTENSION_NAME = "Pegasus Simulator"
-WINDOW_TITLE = "Pegasus Simulator"
+EXTENSION_NAME = "Emissare PegSim"
+WINDOW_TITLE = "Emissare PegSim"
 MENU_PATH = "Window/" + WINDOW_TITLE
 DOC_LINK = "https://docs.omniverse.nvidia.com"
 EXTENSION_OVERVIEW = "This extension shows how to incorporate drones into Isaac Sim"

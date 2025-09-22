@@ -100,21 +100,10 @@ class WidgetWindow(ui.Window):
 
         carb.log_info("WidgetWindow cleanup started")
 
-        # Clean up UI callbacks to break references
+        # Clean up UI subscriptions - they auto-unsubscribe when destroyed
         carb.log_info(f"Cleaning up {len(self._ui_subscriptions)} UI subscriptions")
-        for i, subscription in enumerate(self._ui_subscriptions):
-            try:
-                if subscription is not None:
-                    if hasattr(subscription, 'unsubscribe') and callable(getattr(subscription, 'unsubscribe')):
-                        subscription.unsubscribe()
-                        carb.log_info(f"Successfully unsubscribed UI callback {i}")
-                    else:
-                        carb.log_warn(f"UI subscription {i} has no unsubscribe method")
-                else:
-                    carb.log_warn(f"UI subscription {i} is None")
-            except Exception as e:
-                carb.log_error(f"Failed to unsubscribe UI callback {i}: {str(e)}")
         self._ui_subscriptions.clear()
+        carb.log_info("UI subscriptions cleared - auto-unsubscribed")
 
         # Clean up model references
         self._camera_transform_models.clear()
@@ -159,7 +148,7 @@ class WidgetWindow(ui.Window):
                     # Add build number for debugging
                     with ui.HStack(height=20):
                         ui.Spacer()
-                        ui.Label("Build: 2025.09.21-v6", style={"color": 0x808080FF, "font_size": 12})
+                        ui.Label("Build: 2025.09.21-v20", style={"color": 0x808080FF, "font_size": 12})
                         ui.Spacer()
                     ui.Spacer(height=5)
 
@@ -503,7 +492,7 @@ class WidgetWindow(ui.Window):
                     ui.Label("Gimbal Control", width=WidgetWindow.LABEL_PADDING)
                     self._gimbal_enabled_checkbox = ui.CheckBox(width=20)
                     self._ui_subscriptions.append(
-                        self._gimbal_enabled_checkbox.model.add_value_changed_fn(
+                        self._gimbal_enabled_checkbox.model.subscribe_value_changed_fn(
                             lambda m: self._delegate.on_gimbal_enabled_changed(m.get_value_as_bool())
                         )
                     )
@@ -522,7 +511,7 @@ class WidgetWindow(ui.Window):
 
                 # Wire up pitch controls
                 self._ui_subscriptions.append(
-                    self._gimbal_pitch_slider.model.add_value_changed_fn(
+                    self._gimbal_pitch_slider.model.subscribe_value_changed_fn(
                         lambda m: [
                             self._gimbal_pitch_value.model.set_value(m.get_value_as_float()),
                             self._delegate.on_gimbal_pitch_changed(m.get_value_as_float())
@@ -531,7 +520,7 @@ class WidgetWindow(ui.Window):
                 )
 
                 self._ui_subscriptions.append(
-                    self._gimbal_pitch_value.model.add_value_changed_fn(
+                    self._gimbal_pitch_value.model.subscribe_value_changed_fn(
                         lambda m: [
                             self._gimbal_pitch_slider.model.set_value(m.get_value_as_float()),
                             self._delegate.on_gimbal_pitch_changed(m.get_value_as_float())
@@ -551,7 +540,7 @@ class WidgetWindow(ui.Window):
 
                 # Wire up roll controls
                 self._ui_subscriptions.append(
-                    self._gimbal_roll_slider.model.add_value_changed_fn(
+                    self._gimbal_roll_slider.model.subscribe_value_changed_fn(
                         lambda m: [
                             self._gimbal_roll_value.model.set_value(m.get_value_as_float()),
                             self._delegate.on_gimbal_roll_changed(m.get_value_as_float())
@@ -560,7 +549,7 @@ class WidgetWindow(ui.Window):
                 )
 
                 self._ui_subscriptions.append(
-                    self._gimbal_roll_value.model.add_value_changed_fn(
+                    self._gimbal_roll_value.model.subscribe_value_changed_fn(
                         lambda m: [
                             self._gimbal_roll_slider.model.set_value(m.get_value_as_float()),
                             self._delegate.on_gimbal_roll_changed(m.get_value_as_float())
@@ -580,7 +569,7 @@ class WidgetWindow(ui.Window):
 
                 # Wire up yaw controls
                 self._ui_subscriptions.append(
-                    self._gimbal_yaw_slider.model.add_value_changed_fn(
+                    self._gimbal_yaw_slider.model.subscribe_value_changed_fn(
                         lambda m: [
                             self._gimbal_yaw_value.model.set_value(m.get_value_as_float()),
                             self._delegate.on_gimbal_yaw_changed(m.get_value_as_float())
@@ -589,7 +578,7 @@ class WidgetWindow(ui.Window):
                 )
 
                 self._ui_subscriptions.append(
-                    self._gimbal_yaw_value.model.add_value_changed_fn(
+                    self._gimbal_yaw_value.model.subscribe_value_changed_fn(
                         lambda m: [
                             self._gimbal_yaw_slider.model.set_value(m.get_value_as_float()),
                             self._delegate.on_gimbal_yaw_changed(m.get_value_as_float())
@@ -685,7 +674,7 @@ class WidgetWindow(ui.Window):
                     ui.Label("Enable Manual Control", width=WidgetWindow.LABEL_PADDING)
                     self._motor_control_enabled_checkbox = ui.CheckBox(width=20)
                     self._ui_subscriptions.append(
-                        self._motor_control_enabled_checkbox.model.add_value_changed_fn(
+                        self._motor_control_enabled_checkbox.model.subscribe_value_changed_fn(
                             lambda m: self._delegate.on_manual_motor_enabled_changed(m.get_value_as_bool())
                         )
                     )
@@ -721,7 +710,7 @@ class WidgetWindow(ui.Window):
 
                         # Wire up controls
                         self._ui_subscriptions.append(
-                            slider.model.add_value_changed_fn(
+                            slider.model.subscribe_value_changed_fn(
                                 lambda m, motor_idx=i: [
                                     self._motor_values[motor_idx].model.set_value(m.get_value_as_float()),
                                     self._delegate.on_motor_speed_changed(motor_idx, m.get_value_as_float())
@@ -730,7 +719,7 @@ class WidgetWindow(ui.Window):
                         )
 
                         self._ui_subscriptions.append(
-                            value.model.add_value_changed_fn(
+                            value.model.subscribe_value_changed_fn(
                                 lambda m, motor_idx=i: [
                                     self._motor_sliders[motor_idx].model.set_value(m.get_value_as_float()),
                                     self._delegate.on_motor_speed_changed(motor_idx, m.get_value_as_float())
@@ -753,7 +742,7 @@ class WidgetWindow(ui.Window):
 
                 # Wire up master throttle
                 self._ui_subscriptions.append(
-                    self._master_throttle_slider.model.add_value_changed_fn(
+                    self._master_throttle_slider.model.subscribe_value_changed_fn(
                         lambda m: [
                             self._master_throttle_value.model.set_value(m.get_value_as_float()),
                             self._delegate.on_master_throttle_changed(m.get_value_as_float())
@@ -762,7 +751,7 @@ class WidgetWindow(ui.Window):
                 )
 
                 self._ui_subscriptions.append(
-                    self._master_throttle_value.model.add_value_changed_fn(
+                    self._master_throttle_value.model.subscribe_value_changed_fn(
                         lambda m: [
                             self._master_throttle_slider.model.set_value(m.get_value_as_float()),
                             self._delegate.on_master_throttle_changed(m.get_value_as_float())

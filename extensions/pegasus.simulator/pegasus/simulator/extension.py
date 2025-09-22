@@ -33,6 +33,7 @@ from pegasus.simulator.params import MENU_PATH, WINDOW_TITLE
 from pegasus.simulator.ui.ui_window import WidgetWindow
 from pegasus.simulator.ui.ui_delegate import UIDelegate
 
+
 # Any class derived from `omni.ext.IExt` in top level module (defined in `python.modules` of `extension.toml`) will be
 # instantiated when extension gets enabled and `on_startup(ext_id)` will be called. Later when extension gets disabled
 # on_shutdown() is called.
@@ -49,16 +50,10 @@ class Pegasus_SimulatorExtension(omni.ext.IExt):
         # Initialize state tracking for clean lifecycle management
         self._menu_created = False
         self._window_created = False
-        self._workspace_registered = False
 
         # Create the UI of the app and its manager
         self.ui_delegate = None
         self.ui_window = None
-
-        # Add the ability to show the window if the system requires it (QuickLayout feature)
-        ui.Workspace.set_show_window_fn(WINDOW_TITLE, self._create_show_window_callback())
-        self._workspace_registered = True
-        carb.log_info("Workspace show function registered")
 
         # Add the extension to the editor menu inside isaac sim
         editor_menu = omni.kit.ui.get_editor_menu()
@@ -69,10 +64,10 @@ class Pegasus_SimulatorExtension(omni.ext.IExt):
         else:
             carb.log_warn("Editor menu not available, skipping menu creation")
 
-        # Show the window (It call the self.show_window)
-        carb.log_info(f"About to call ui.Workspace.show_window with WINDOW_TITLE='{WINDOW_TITLE}'")
-        ui.Workspace.show_window(WINDOW_TITLE, show=True)
-        carb.log_info("ui.Workspace.show_window completed")
+        # Show the window directly (no workspace callback needed)
+        carb.log_info("Creating window directly")
+        self.show_window(None, True)
+        carb.log_info("Window creation completed")
 
 
     def show_window(self, menu, show):
@@ -169,15 +164,11 @@ class Pegasus_SimulatorExtension(omni.ext.IExt):
             editor_menu = omni.kit.ui.get_editor_menu()
             if editor_menu:
                 try:
-                    # Check if menu item exists before removal
-                    if editor_menu.get_menu_item(MENU_PATH) is not None:
-                        carb.log_info(f"Removing editor menu item: {MENU_PATH}")
-                        editor_menu.remove_item(MENU_PATH)
-                        carb.log_info("Editor menu item removed successfully")
-                    else:
-                        carb.log_info(f"Menu item {MENU_PATH} not found, skipping removal")
+                    carb.log_info(f"Removing editor menu item: {MENU_PATH}")
+                    editor_menu.remove_item(MENU_PATH)
+                    carb.log_info("Editor menu item removed successfully")
                 except Exception as e:
-                    carb.log_warn(f"Failed to remove editor menu item {MENU_PATH}: {str(e)}")
+                    carb.log_info(f"Menu item {MENU_PATH} already removed or not found: {str(e)}")
             else:
                 carb.log_warn("Editor menu not available for cleanup")
             self._menu_created = False
@@ -205,33 +196,11 @@ class Pegasus_SimulatorExtension(omni.ext.IExt):
         else:
             carb.log_info("Window already cleaned up, skipping window cleanup")
 
-        # 3. De-register workspace function (if it was registered)
-        if self._workspace_registered:
-            ui.Workspace.set_show_window_fn(WINDOW_TITLE, None)
-            self._workspace_registered = False
-            carb.log_info("Workspace show function unregistered")
-        else:
-            carb.log_info("Workspace function was not registered, skipping")
-
-        # 4. Reset all state flags
+        # 3. Reset all state flags
         self._menu_created = False
         self._window_created = False
-        self._workspace_registered = False
 
         carb.log_info("Pegasus Isaac extension shutdown completed")
 
         # Call the garbage collector
         gc.collect()
-
-    def _create_show_window_callback(self):
-        """
-        Create a weakref-based callback to avoid reference leaks
-        """
-        weak_self = weakref.ref(self)
-
-        def show_window_callback(show):
-            strong_self = weak_self()
-            if strong_self is not None:
-                strong_self.show_window(None, show)
-
-        return show_window_callback

@@ -50,11 +50,11 @@ class ThrustCurve:
         pass
 
     @property
-    def rolling_moment(self):
-        """The total rolling moment being generated on the body frame of the vehicle by the rotating propellers
+    def reaction_torque(self):
+        """The total motor reaction torque being generated on the body frame of the vehicle by the motors
 
         Returns:
-            float: The total rolling moment to apply to the vehicle body frame (Torque about the Z-axis) in Nm
+            float: The total reaction torque to apply to the vehicle body frame (Torque about the Z-axis) in Nm
         """
         pass
 

@@ -50,6 +50,8 @@ class PX4LaunchTool:
         # Set the environement variables that let PX4 know which vehicle model to use internally
         self.environment = os.environ
         self.environment["PX4_SIM_MODEL"] = px4_model
+        self.environment["PX4_HOME_LAT"] = "32.774631"
+        self.environment["PX4_HOME_LON"] = "-117.079529"
 
     def launch_px4(self):
         """

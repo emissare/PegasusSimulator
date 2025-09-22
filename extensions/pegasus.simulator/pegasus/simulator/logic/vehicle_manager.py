@@ -58,7 +58,10 @@ class VehicleManager:
         """
         Method that returns the current vehicle manager.
         """
-        return VehicleManager()
+        # Return the cached instance directly without triggering __new__
+        if VehicleManager._instance is None:
+            VehicleManager._instance = VehicleManager()
+        return VehicleManager._instance
 
     def add_vehicle(self, stage_prefix: str, vehicle):
         """

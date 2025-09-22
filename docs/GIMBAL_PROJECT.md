@@ -44,6 +44,26 @@ This project implements a programmatic vehicle generation system with multi-sens
 - [x] MAVLink command integration
 - [x] Manual control sliders and preset buttons
 
+### Phase 5: Path Management & Debugging ✅
+- [x] Created centralized path utilities module (pegasus/simulator/utils/paths.py)
+- [x] Fixed gimbal config file loading with proper path resolution
+- [x] Eliminated fragile parent directory navigation patterns
+- [x] Resolved all vehicle loading errors
+
+### Phase 6: Articulation & Physics ✅
+- [x] Fixed rigid body registration for programmatic vehicles
+- [x] Proper ArticulationRootAPI application at vehicle root level
+- [x] Corrected rotor geometry for visual spinning (blade-shaped)
+- [x] Implemented three-state rotor logic (stopped/idle/active)
+- [x] Added revolute joints with proper drive configuration
+
+### Phase 7: Manual Motor Control ✅
+- [x] Manual motor control UI with individual motor sliders
+- [x] Master throttle control for all motors
+- [x] Enable/disable manual override functionality
+- [x] Real-time motor speed visualization through rotor spinning
+- [x] Integration with existing PX4 control systems
+
 ## Directory Structure
 
 ```
@@ -62,13 +82,16 @@ EmissarePegasusSimulator/
 │   └── pegasus/simulator/
 │       └── logic/
 │           ├── vehicles/
-│           │   ├── multirotor.py            # UPDATED: YAML-based vehicle creation
+│           │   ├── multirotor.py            # UPDATED: YAML-based vehicle creation + manual motor control
 │           │   └── vehicle.py               # MODIFIED: Support no-USD mode
 │           ├── graphical_sensors/
 │           │   ├── gimbal_system.py        # NEW: Gimbal implementation
 │           │   └── laser_rangefinder.py    # NEW: Laser sensor
-│           └── ui/
-│               └── ui_window.py             # MODIFIED: Add gimbal controls
+│           ├── ui/
+│           │   ├── ui_window.py             # MODIFIED: Add gimbal + motor controls
+│           │   └── ui_delegate.py           # MODIFIED: Motor control callbacks
+│           └── utils/
+│               └── paths.py                 # NEW: Centralized path management
 ```
 
 ## Technical Specifications
@@ -159,6 +182,9 @@ vehicle:
 - ✅ Sensors provide expected output
 - ✅ MAVLink commands reach PX4
 - ✅ Same control interface works for real hardware
+- ✅ Manual motor control for testing and debugging
+- ✅ Visual rotor spinning feedback
+- ✅ Proper articulation and physics simulation
 
 ## Future Extensions
 
@@ -182,9 +208,24 @@ vehicle:
 
 ## Progress Tracking
 
-**Current Status**: Phase 4 Complete - Debugging vehicle loading issues
-**Last Updated**: 2025-09-21
-**Next Milestone**: Resolve YAML vehicle loading errors and complete testing
+**Current Status**: Phase 7 Complete - Full System Implementation
+**Last Updated**: 2025-09-22
+**Next Milestone**: Performance optimization and additional vehicle types
+
+**Major Achievements Completed:**
+- ✅ Full programmatic vehicle creation system
+- ✅ All loading errors resolved with proper path management
+- ✅ Complete manual motor control UI implementation
+- ✅ Visual rotor spinning with three-state logic
+- ✅ Proper USD/PhysX articulation integration
+- ✅ Clean code architecture without defensive programming
+
+**Key Technical Solutions:**
+- **Path Management**: Centralized utilities module eliminates fragile parent navigation
+- **Articulation Setup**: ArticulationRootAPI applied at vehicle root, not body level
+- **Rotor Physics**: Single rigid body per rotor with RevoluteJoint for visual spinning
+- **Motor Control**: Three-state logic (stopped/idle/active) with proper velocity control
+- **Clean Architecture**: Direct method calls without defensive programming patterns
 
 **Key Decisions:**
 - YAML-only configuration (USD support completely removed)
@@ -192,6 +233,7 @@ vehicle:
 - Manual testing approach
 - MAVLink protocol compatibility
 - Multi-sensor gimbal design
+- Explicit error handling (no silent failures)
 
 ---
 
