@@ -1,0 +1,49 @@
+# Basic Quadrotor Configuration - No Gimbal
+# Simple quadrotor for testing flight dynamics and basic operations
+
+vehicle:
+  type: "quadrotor_x"           # Standard X configuration
+  name: "Basic Quadrotor"       # Display name
+
+  # Physical configuration
+  rotor_separation: 0.3         # meters - diagonal distance between motors
+  mass: 1.5                     # kg - total vehicle mass
+  motor: "Generic_Medium"       # Reference to motor database
+
+  # Body configuration
+  body:
+    dimensions: [0.3, 0.3, 0.08]  # [length, width, height] in meters
+    color: [100, 100, 100]        # RGB color values (0-255)
+
+  # Standard sensors
+  sensors:
+    imu:
+      enabled: true
+      frequency: 250              # Hz
+      position: [0.0, 0.0, 0.0]   # Center of body
+
+    gps:
+      enabled: true
+      frequency: 10               # Hz
+      position: [0.0, 0.0, 0.02]  # Slightly above center
+
+    barometer:
+      enabled: true
+      frequency: 50               # Hz
+      position: [0.0, 0.0, 0.01]  # Near center
+
+  # No gimbal configuration
+  gimbal:
+    enabled: false
+
+# Flight characteristics with Generic_Medium motor:
+# - Balanced agility and stability
+# - Moderate payload capacity
+# - Good for general testing and development
+# - 3.5-4 inch propeller compatibility
+
+# Use cases:
+# - Basic flight testing
+# - Control algorithm development
+# - Sensor integration testing
+# - PX4/ArduPilot integration

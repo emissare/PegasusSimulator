@@ -1,0 +1,141 @@
+# Multi-Sensor Gimbal Configuration
+# 3-axis stabilized gimbal with color camera, monochrome camera, and laser rangefinder
+
+gimbal:
+  name: "Multi-Sensor Survey Gimbal"
+  type: "3_axis_stabilized"
+
+  # Physical gimbal structure
+  structure:
+    # Gimbal body dimensions
+    mount_size: [0.08, 0.08, 0.04]     # [length, width, height] in meters
+    mount_color: [80, 80, 80]          # RGB color for gimbal body
+    joint_damping: 0.1                 # Joint damping coefficient
+
+  # Joint configuration - 3-axis gimbal
+  joints:
+    yaw:
+      axis: "Z"                        # Rotation axis
+      range: [-180, 180]               # Joint limits in degrees
+      max_velocity: 90                 # Maximum angular velocity [deg/s]
+      default_position: 0              # Default angle [degrees]
+
+    roll:
+      axis: "X"                        # Rotation axis
+      range: [-45, 45]                 # Joint limits in degrees
+      max_velocity: 90                 # Maximum angular velocity [deg/s]
+      default_position: 0              # Default angle [degrees]
+
+    pitch:
+      axis: "Y"                        # Rotation axis
+      range: [-135, 45]                # Joint limits in degrees (-135° = downward)
+      max_velocity: 90                 # Maximum angular velocity [deg/s]
+      default_position: -90            # Default to point downward
+
+  # Sensor package configuration
+  sensors:
+    # Primary color camera for high-quality imaging
+    color_camera:
+      type: "monocular_camera"
+      name: "color_cam"
+      enabled: true
+
+      # Physical mounting
+      position: [0.05, 0.0, 0.0]       # Relative to gimbal center [m]
+      orientation: [0.0, 0.0, 0.0]     # Euler angles [degrees]
+
+      # Camera specifications
+      resolution: [1920, 1080]         # Image resolution [pixels]
+      frequency: 30                    # Frame rate [Hz]
+      fov: 90                          # Field of view [degrees]
+
+      # Advanced settings
+      depth: false                     # RGB only
+      grayscale: false                 # Color mode
+      intrinsics: "auto"               # Auto-calculate from resolution and FOV
+
+    # Secondary monochrome camera for computer vision
+    monochrome_camera:
+      type: "monocular_camera"
+      name: "mono_cam"
+      enabled: true
+
+      # Physical mounting (offset to side)
+      position: [0.05, 0.03, 0.0]      # Slightly to the right [m]
+      orientation: [0.0, 0.0, 0.0]     # Same orientation as color camera
+
+      # Camera specifications
+      resolution: [640, 480]           # Lower resolution for speed
+      frequency: 60                    # Higher frame rate [Hz]
+      fov: 120                         # Wider field of view [degrees]
+
+      # Advanced settings
+      depth: true                      # Include depth information
+      grayscale: true                  # Monochrome mode
+      intrinsics: "auto"               # Auto-calculate
+
+    # Laser rangefinder for precise distance measurement
+    laser_rangefinder:
+      type: "laser_rangefinder"
+      name: "lidar_sensor"
+      enabled: true
+
+      # Physical mounting (offset to other side)
+      position: [0.05, -0.03, 0.0]     # Slightly to the left [m]
+      orientation: [0.0, 0.0, 0.0]     # Same orientation as cameras
+
+      # Rangefinder specifications
+      max_range: 100.0                 # Maximum measurement distance [m]
+      min_range: 0.1                   # Minimum measurement distance [m]
+      frequency: 10                    # Measurement rate [Hz]
+      beam_width: 0.01                 # Beam divergence [radians]
+      accuracy: 0.02                   # Measurement accuracy [m]
+
+  # Control configuration
+  control:
+    # Default control mode
+    mode: "position"                   # "position", "velocity", or "manual"
+
+    # Stabilization settings
+    stabilization:
+      enabled: true                    # Enable attitude stabilization
+      use_vehicle_imu: true            # Use vehicle IMU for stabilization
+      compensation_rate: 0.8           # Compensation strength [0.0-1.0]
+
+    # Control gains (PID parameters)
+    gains:
+      position:
+        p_gain: 0.8                    # Proportional gain
+        i_gain: 0.035                  # Integral gain
+        d_gain: 0.02                   # Derivative gain
+        i_max: 0.0                     # Integral windup limit
+        i_min: 0.0                     # Integral windup limit
+        cmd_max: 0.3                   # Maximum command output
+        cmd_min: -0.3                  # Minimum command output
+
+  # MAVLink integration
+  mavlink:
+    component_id: 154                  # MAV_COMP_ID_GIMBAL (154)
+    protocol_version: 2                # MAVLink gimbal protocol v2
+
+    # Supported capabilities
+    capabilities:
+      has_neutral: true                # Supports neutral position
+      has_roll_axis: true              # Has roll control
+      has_roll_follow: true            # Can follow roll
+      has_pitch_axis: true             # Has pitch control
+      has_pitch_follow: true           # Can follow pitch
+      has_yaw_axis: true               # Has yaw control
+      has_yaw_follow: true             # Can follow yaw
+      supports_infinite_yaw: true      # No yaw limits
+
+    # Message rates
+    status_rate: 10                    # Gimbal status message rate [Hz]
+    orientation_rate: 50               # Orientation update rate [Hz]
+
+# Usage notes:
+# - Color camera: Primary imaging, surveying, mapping
+# - Monochrome camera: Computer vision, object detection, tracking
+# - Laser rangefinder: Terrain following, obstacle avoidance, 3D mapping
+# - Stabilization: Compensates for vehicle motion for smooth footage
+# - MAVLink: Compatible with QGroundControl and companion computers

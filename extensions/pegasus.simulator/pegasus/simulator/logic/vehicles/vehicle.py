@@ -81,7 +81,10 @@ class Vehicle(Robot):
         # Spawn the vehicle primitive in the world's stage
         self._prim = define_prim(self._stage_prefix, "Xform")
         self._prim = get_prim_at_path(self._stage_prefix)
-        self._prim.GetReferences().AddReference(self._usd_file)
+
+        # Only add USD reference if a file is provided (for programmatic vehicles, usd_path is empty)
+        if self._usd_file and self._usd_file.strip():
+            self._prim.GetReferences().AddReference(self._usd_file)
 
         # Initialize the "Robot" class
         # Note: we need to change the rotation to have qw first, because NVidia
@@ -188,8 +191,9 @@ class Vehicle(Robot):
         'remove_vehicle' from the VehicleManager in order to remove the vehicle from the list of active vehicles.
         """
 
-        # Remove this object from the vehicleHandler
-        VehicleManager.get_vehicle_manager().remove_vehicle(self._stage_prefix)
+        # Remove this object from the vehicleHandler (only if _stage_prefix exists)
+        if hasattr(self, '_stage_prefix'):
+            VehicleManager.get_vehicle_manager().remove_vehicle(self._stage_prefix)
 
     """
     Properties

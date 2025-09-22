@@ -4,4 +4,4 @@
 """
 
 from .vehicle import Vehicle
-from .multirotor import Multirotor, MultirotorConfig
+from .multirotor import Multirotor

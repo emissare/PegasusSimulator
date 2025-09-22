@@ -16,7 +16,7 @@ import omni.ui as ui
 from omni.ui import color as cl
 
 from pegasus.simulator.ui.ui_delegate import UIDelegate
-from pegasus.simulator.params import ROBOTS, SIMULATION_ENVIRONMENTS, THUMBNAIL, WORLD_THUMBNAIL, WINDOW_TITLE
+from pegasus.simulator.params import VEHICLES, SIMULATION_ENVIRONMENTS, THUMBNAIL, WORLD_THUMBNAIL, WINDOW_TITLE
 
 
 class WidgetWindow(ui.Window):
@@ -72,13 +72,77 @@ class WidgetWindow(ui.Window):
         self._camera_transform_models = []
         self._vehicle_transform_models = []
 
+        # Track UI callbacks and elements for cleanup
+        self._ui_subscriptions = []
+        self._gimbal_buttons = []
+        self._gimbal_enabled_checkbox = None
+        self._gimbal_pitch_slider = None
+        self._gimbal_pitch_value = None
+        self._gimbal_roll_slider = None
+        self._gimbal_roll_value = None
+        self._gimbal_yaw_slider = None
+        self._gimbal_yaw_value = None
+
+        # Motor control UI elements
+        self._motor_control_enabled_checkbox = None
+        self._motor_sliders = []
+        self._motor_values = []
+        self._master_throttle_slider = None
+        self._master_throttle_value = None
+
         # Build the actual window UI
         self._build_window()
 
     def destroy(self):
 
-        # Clear the world and the stage correctly
-        self._delegate.on_clear_scene()
+        # Only destroy the UI window - do NOT clear the scene during shutdown
+        # (on_clear_scene() should only be called when user explicitly clicks "Clear Scene")
+
+        carb.log_info("WidgetWindow cleanup started")
+
+        # Clean up UI callbacks to break references
+        carb.log_info(f"Cleaning up {len(self._ui_subscriptions)} UI subscriptions")
+        for i, subscription in enumerate(self._ui_subscriptions):
+            try:
+                if subscription is not None:
+                    if hasattr(subscription, 'unsubscribe') and callable(getattr(subscription, 'unsubscribe')):
+                        subscription.unsubscribe()
+                        carb.log_info(f"Successfully unsubscribed UI callback {i}")
+                    else:
+                        carb.log_warn(f"UI subscription {i} has no unsubscribe method")
+                else:
+                    carb.log_warn(f"UI subscription {i} is None")
+            except Exception as e:
+                carb.log_error(f"Failed to unsubscribe UI callback {i}: {str(e)}")
+        self._ui_subscriptions.clear()
+
+        # Clean up model references
+        self._camera_transform_models.clear()
+        self._vehicle_transform_models.clear()
+
+        # Clear gimbal UI element references to break potential circular references
+        self._gimbal_buttons.clear()
+        self._gimbal_enabled_checkbox = None
+        self._gimbal_pitch_slider = None
+        self._gimbal_pitch_value = None
+        self._gimbal_roll_slider = None
+        self._gimbal_roll_value = None
+        self._gimbal_yaw_slider = None
+        self._gimbal_yaw_value = None
+
+        # Clean up delegate reference and call its cleanup
+        if self._delegate:
+            try:
+                carb.log_info("Calling UIDelegate cleanup")
+                self._delegate.cleanup()
+                carb.log_info("UIDelegate cleanup completed successfully")
+            except Exception as e:
+                carb.log_error(f"Failed to cleanup UIDelegate: {str(e)}")
+            self._delegate = None
+        else:
+            carb.log_info("UIDelegate already None, skipping cleanup")
+
+        carb.log_info("WidgetWindow cleanup completed")
 
         # It will destroy all the children
         super().destroy()
@@ -92,6 +156,13 @@ class WidgetWindow(ui.Window):
 
                 # Vertical Stack of menus
                 with ui.VStack():
+                    # Add build number for debugging
+                    with ui.HStack(height=20):
+                        ui.Spacer()
+                        ui.Label("Build: 2025.09.21-v6", style={"color": 0x808080FF, "font_size": 12})
+                        ui.Spacer()
+                    ui.Spacer(height=5)
+
                     # Create a frame for configuring PX4 settings
                     self._px4_configuration_frame()
                     ui.Spacer(height=5)
@@ -106,6 +177,14 @@ class WidgetWindow(ui.Window):
 
                     # Create a frame for selecting the camera position, and what it should point torwards to
                     self._viewport_camera_frame()
+                    ui.Spacer(height=5)
+
+                    # Create a frame for manual gimbal control
+                    self._gimbal_control_frame()
+                    ui.Spacer(height=5)
+
+                    # Create a frame for manual motor control
+                    self._motor_control_frame()
                     ui.Spacer()
 
     def _scene_selection_frame(self):
@@ -223,9 +302,9 @@ class WidgetWindow(ui.Window):
                             ui.Label("Vehicle Model", name="label", width=WidgetWindow.LABEL_PADDING, alignment=ui.Alignment.TOP)
 
                             # Combo box with the available vehicles to select from
-                            dropdown_menu = ui.ComboBox(0, name="robots")
-                            for robot in ROBOTS:
-                                dropdown_menu.model.append_child_item(None, ui.SimpleStringModel(robot))
+                            dropdown_menu = ui.ComboBox(0, name="vehicles")
+                            for vehicle in VEHICLES:
+                                dropdown_menu.model.append_child_item(None, ui.SimpleStringModel(vehicle))
                             self._delegate.set_vehicle_dropdown(dropdown_menu.model)
 
                             # Store reference to the dropdown for refreshing
@@ -239,9 +318,6 @@ class WidgetWindow(ui.Window):
                             vehicle_id_field = ui.IntField()
                             self._delegate.set_vehicle_id_field(vehicle_id_field.model)
 
-                with ui.HStack():
-                    # Add a frame transform to select the position of where to place the selected robot in the world
-                    self._transform_frame()
                 
                 # Buttons to load and save the vehicle
                 with ui.HStack():
@@ -364,66 +440,19 @@ class WidgetWindow(ui.Window):
                 )
                 ui.Spacer()
 
-    def _transform_frame(self):
-        """
-        Method that implements a transform frame to translate and rotate an object that is about to be spawned
-        """
-
-        components = ["Position", "Rotation"]
-        all_axis = ["X", "Y", "Z"]
-        colors = {"X": 0xFF5555AA, "Y": 0xFF76A371, "Z": 0xFFA07D4F}
-        default_values = [0.0, 0.0, 0.1]
-
-        with ui.CollapsableFrame("Position and Orientation"):
-            with ui.VStack(spacing=8):
-
-                ui.Spacer(height=0)
-
-                # Iterate over the position and rotation menus
-                for component in components:
-                    with ui.HStack():
-                        with ui.HStack():
-                            ui.Label(component, name="transform", width=50)
-                            ui.Spacer()
-                        # Fields X, Y and Z
-                        for axis, default_value in zip(all_axis, default_values):
-                            with ui.HStack():
-                                with ui.ZStack(width=15):
-                                    ui.Rectangle(
-                                        width=15,
-                                        height=20,
-                                        style={
-                                            "background_color": colors[axis],
-                                            "border_radius": 3,
-                                            "corner_flag": ui.CornerFlag.LEFT,
-                                        },
-                                    )
-                                    ui.Label(axis, name="transform_label", alignment=ui.Alignment.CENTER)
-                                if component == "Position":
-                                    float_drag = ui.FloatDrag(name="transform", min=-1000000, max=1000000, step=0.01)
-                                    float_drag.model.set_value(default_value)
-                                else:
-                                    float_drag = ui.FloatDrag(name="transform", min=-180.0, max=180.0, step=0.01)
-                                # Save the model of each FloatDrag such that we can access its values later on
-                                self._vehicle_transform_models.append(float_drag.model)
-                                ui.Circle(name="transform", width=20, radius=3.5, size_policy=ui.CircleSizePolicy.FIXED)
-                ui.Spacer(height=0)
 
     # ------------------------------------------------------------------------------------------------
     # TODO - optimize the reading of values from the transform widget. This could be one function only
     # ------------------------------------------------------------------------------------------------
 
     def get_selected_vehicle_attitude(self):
-
-        # Extract the vehicle desired position and orientation for spawning
-        if len(self._vehicle_transform_models) == 6:
-            vehicle_pos = np.array([self._vehicle_transform_models[i].get_value_as_float() for i in range(3)])
-            vehicel_orientation = np.array(
-                [self._vehicle_transform_models[i].get_value_as_float() for i in range(3, 6)]
-            )
-            return vehicle_pos, vehicel_orientation
-
-        return None, None
+        """
+        Return fixed vehicle spawn position and orientation (always at origin).
+        """
+        # Always spawn at origin with no rotation
+        vehicle_pos = np.array([0.0, 0.0, 0.0])
+        vehicle_orientation = np.array([0.0, 0.0, 0.0])
+        return vehicle_pos, vehicle_orientation
 
     def get_selected_camera_pos(self):
         """
@@ -443,19 +472,302 @@ class WidgetWindow(ui.Window):
         Method to refresh the vehicle dropdown by rescanning the assets directory
         """
         # Import here to avoid circular imports
-        from pegasus.simulator.params import refresh_robots
+        from pegasus.simulator.params import refresh_vehicles
 
-        # Refresh the robots dictionary
-        updated_robots = refresh_robots()
+        # Refresh the vehicles dictionary
+        updated_vehicles = refresh_vehicles()
 
         # Clear the current dropdown items
         self._vehicle_dropdown_menu.model.clear()
 
         # Repopulate with new items
-        for robot in updated_robots:
-            self._vehicle_dropdown_menu.model.append_child_item(None, ui.SimpleStringModel(robot))
+        for vehicle in updated_vehicles:
+            self._vehicle_dropdown_menu.model.append_child_item(None, ui.SimpleStringModel(vehicle))
 
         # Update the delegate's vehicles names list
-        self._delegate._vehicles_names = list(updated_robots.keys())
+        self._delegate._vehicles_names = list(updated_vehicles.keys())
 
-        carb.log_info(f"Vehicle list refreshed: found {len(updated_robots)} vehicles")
+        carb.log_info(f"Vehicle list refreshed: found {len(updated_vehicles)} vehicles")
+
+    def _gimbal_control_frame(self):
+        """
+        Method that implements manual gimbal control interface
+        """
+
+        with ui.CollapsableFrame("Gimbal Control", collapsed=False):
+            with ui.VStack(height=0, spacing=5, name="gimbal_frame_v_stack"):
+                ui.Spacer(height=WidgetWindow.GENERAL_SPACING)
+
+                # Gimbal control enable/disable
+                with ui.HStack():
+                    ui.Label("Gimbal Control", width=WidgetWindow.LABEL_PADDING)
+                    self._gimbal_enabled_checkbox = ui.CheckBox(width=20)
+                    self._ui_subscriptions.append(
+                        self._gimbal_enabled_checkbox.model.add_value_changed_fn(
+                            lambda m: self._delegate.on_gimbal_enabled_changed(m.get_value_as_bool())
+                        )
+                    )
+
+                ui.Spacer(height=5)
+
+                # Pitch control (-135° to +45°)
+                with ui.HStack():
+                    ui.Label("Pitch", width=80)
+                    self._gimbal_pitch_slider = ui.FloatSlider(
+                        min=-135.0, max=45.0, default=-90.0,
+                        width=150, height=20
+                    )
+                    self._gimbal_pitch_value = ui.FloatField(width=60, height=20)
+                    self._gimbal_pitch_value.model.set_value(-90.0)
+
+                # Wire up pitch controls
+                self._ui_subscriptions.append(
+                    self._gimbal_pitch_slider.model.add_value_changed_fn(
+                        lambda m: [
+                            self._gimbal_pitch_value.model.set_value(m.get_value_as_float()),
+                            self._delegate.on_gimbal_pitch_changed(m.get_value_as_float())
+                        ]
+                    )
+                )
+
+                self._ui_subscriptions.append(
+                    self._gimbal_pitch_value.model.add_value_changed_fn(
+                        lambda m: [
+                            self._gimbal_pitch_slider.model.set_value(m.get_value_as_float()),
+                            self._delegate.on_gimbal_pitch_changed(m.get_value_as_float())
+                        ]
+                    )
+                )
+
+                # Roll control (-45° to +45°)
+                with ui.HStack():
+                    ui.Label("Roll", width=80)
+                    self._gimbal_roll_slider = ui.FloatSlider(
+                        min=-45.0, max=45.0, default=0.0,
+                        width=150, height=20
+                    )
+                    self._gimbal_roll_value = ui.FloatField(width=60, height=20)
+                    self._gimbal_roll_value.model.set_value(0.0)
+
+                # Wire up roll controls
+                self._ui_subscriptions.append(
+                    self._gimbal_roll_slider.model.add_value_changed_fn(
+                        lambda m: [
+                            self._gimbal_roll_value.model.set_value(m.get_value_as_float()),
+                            self._delegate.on_gimbal_roll_changed(m.get_value_as_float())
+                        ]
+                    )
+                )
+
+                self._ui_subscriptions.append(
+                    self._gimbal_roll_value.model.add_value_changed_fn(
+                        lambda m: [
+                            self._gimbal_roll_slider.model.set_value(m.get_value_as_float()),
+                            self._delegate.on_gimbal_roll_changed(m.get_value_as_float())
+                        ]
+                    )
+                )
+
+                # Yaw control (-180° to +180°)
+                with ui.HStack():
+                    ui.Label("Yaw", width=80)
+                    self._gimbal_yaw_slider = ui.FloatSlider(
+                        min=-180.0, max=180.0, default=0.0,
+                        width=150, height=20
+                    )
+                    self._gimbal_yaw_value = ui.FloatField(width=60, height=20)
+                    self._gimbal_yaw_value.model.set_value(0.0)
+
+                # Wire up yaw controls
+                self._ui_subscriptions.append(
+                    self._gimbal_yaw_slider.model.add_value_changed_fn(
+                        lambda m: [
+                            self._gimbal_yaw_value.model.set_value(m.get_value_as_float()),
+                            self._delegate.on_gimbal_yaw_changed(m.get_value_as_float())
+                        ]
+                    )
+                )
+
+                self._ui_subscriptions.append(
+                    self._gimbal_yaw_value.model.add_value_changed_fn(
+                        lambda m: [
+                            self._gimbal_yaw_slider.model.set_value(m.get_value_as_float()),
+                            self._delegate.on_gimbal_yaw_changed(m.get_value_as_float())
+                        ]
+                    )
+                )
+
+                ui.Spacer(height=5)
+
+                # Preset buttons
+                with ui.HStack():
+                    button1 = ui.Button(
+                        "Point Down",
+                        clicked_fn=self._on_gimbal_point_down_clicked,
+                        height=WidgetWindow.BUTTON_HEIGHT // 2,
+                        style=WidgetWindow.BUTTON_BASE_STYLE
+                    )
+                    self._gimbal_buttons.append(button1)
+
+                    button2 = ui.Button(
+                        "Point Forward",
+                        clicked_fn=self._on_gimbal_center_clicked,
+                        height=WidgetWindow.BUTTON_HEIGHT // 2,
+                        style=WidgetWindow.BUTTON_BASE_STYLE
+                    )
+                    self._gimbal_buttons.append(button2)
+
+                with ui.HStack():
+                    button3 = ui.Button(
+                        "Stabilize Mode",
+                        clicked_fn=self._on_gimbal_stabilize_clicked,
+                        height=WidgetWindow.BUTTON_HEIGHT // 2,
+                        style=WidgetWindow.BUTTON_BASE_STYLE
+                    )
+                    self._gimbal_buttons.append(button3)
+
+                    button4 = ui.Button(
+                        "Manual Mode",
+                        clicked_fn=self._on_gimbal_manual_clicked,
+                        height=WidgetWindow.BUTTON_HEIGHT // 2,
+                        style=WidgetWindow.BUTTON_BASE_STYLE
+                    )
+                    self._gimbal_buttons.append(button4)
+
+                ui.Spacer(height=WidgetWindow.GENERAL_SPACING)
+
+    def _set_gimbal_preset(self, pitch: float, roll: float, yaw: float):
+        """
+        Set gimbal to a preset position and update UI controls.
+        """
+        # Update sliders
+        self._gimbal_pitch_slider.model.set_value(pitch)
+        self._gimbal_roll_slider.model.set_value(roll)
+        self._gimbal_yaw_slider.model.set_value(yaw)
+
+        # Update value fields
+        self._gimbal_pitch_value.model.set_value(pitch)
+        self._gimbal_roll_value.model.set_value(roll)
+        self._gimbal_yaw_value.model.set_value(yaw)
+
+        # Notify delegate
+        self._delegate.on_gimbal_preset_clicked(pitch, roll, yaw)
+
+    def _on_gimbal_point_down_clicked(self):
+        """Handle Point Down preset button click"""
+        self._set_gimbal_preset(-90, 0, 0)
+
+    def _on_gimbal_center_clicked(self):
+        """Handle Center preset button click"""
+        self._set_gimbal_preset(0, 0, 0)
+
+    def _on_gimbal_stabilize_clicked(self):
+        """Handle Stabilize mode button click"""
+        if self._delegate:
+            self._delegate.on_gimbal_stabilize_clicked()
+
+    def _on_gimbal_manual_clicked(self):
+        """Handle Manual mode button click"""
+        if self._delegate:
+            self._delegate.on_gimbal_manual_clicked()
+
+    def _motor_control_frame(self):
+        """
+        Method that implements manual motor control interface
+        """
+
+        with ui.CollapsableFrame("Motor Control (Manual Override)", collapsed=False):
+            with ui.VStack(height=0, spacing=5, name="motor_frame_v_stack"):
+                ui.Spacer(height=WidgetWindow.GENERAL_SPACING)
+
+                # Motor control enable/disable with warning
+                with ui.HStack():
+                    ui.Label("Enable Manual Control", width=WidgetWindow.LABEL_PADDING)
+                    self._motor_control_enabled_checkbox = ui.CheckBox(width=20)
+                    self._ui_subscriptions.append(
+                        self._motor_control_enabled_checkbox.model.add_value_changed_fn(
+                            lambda m: self._delegate.on_manual_motor_enabled_changed(m.get_value_as_bool())
+                        )
+                    )
+
+                # Warning label (initially hidden)
+                with ui.HStack():
+                    ui.Spacer()
+                    ui.Label("⚠️  WARNING: Overrides PX4 Commands",
+                            style={"color": 0xFF4444FF, "font_size": 12},
+                            alignment=ui.Alignment.CENTER)
+                    ui.Spacer()
+
+                ui.Spacer(height=5)
+
+                # Individual motor controls
+                self._motor_sliders = []
+                self._motor_values = []
+
+                for i in range(4):
+                    with ui.HStack():
+                        ui.Label(f"Motor {i+1}", width=60)
+                        slider = ui.FloatSlider(
+                            min=0.0, max=100.0, default=0.0,
+                            width=120, height=20
+                        )
+                        value = ui.FloatField(width=50, height=20)
+                        value.model.set_value(0.0)
+                        ui.Label("%", width=15)
+
+                        # Store references
+                        self._motor_sliders.append(slider)
+                        self._motor_values.append(value)
+
+                        # Wire up controls
+                        self._ui_subscriptions.append(
+                            slider.model.add_value_changed_fn(
+                                lambda m, motor_idx=i: [
+                                    self._motor_values[motor_idx].model.set_value(m.get_value_as_float()),
+                                    self._delegate.on_motor_speed_changed(motor_idx, m.get_value_as_float())
+                                ]
+                            )
+                        )
+
+                        self._ui_subscriptions.append(
+                            value.model.add_value_changed_fn(
+                                lambda m, motor_idx=i: [
+                                    self._motor_sliders[motor_idx].model.set_value(m.get_value_as_float()),
+                                    self._delegate.on_motor_speed_changed(motor_idx, m.get_value_as_float())
+                                ]
+                            )
+                        )
+
+                ui.Spacer(height=5)
+
+                # Master throttle control
+                with ui.HStack():
+                    ui.Label("Master", width=60)
+                    self._master_throttle_slider = ui.FloatSlider(
+                        min=0.0, max=100.0, default=0.0,
+                        width=120, height=20
+                    )
+                    self._master_throttle_value = ui.FloatField(width=50, height=20)
+                    self._master_throttle_value.model.set_value(0.0)
+                    ui.Label("%", width=15)
+
+                # Wire up master throttle
+                self._ui_subscriptions.append(
+                    self._master_throttle_slider.model.add_value_changed_fn(
+                        lambda m: [
+                            self._master_throttle_value.model.set_value(m.get_value_as_float()),
+                            self._delegate.on_master_throttle_changed(m.get_value_as_float())
+                        ]
+                    )
+                )
+
+                self._ui_subscriptions.append(
+                    self._master_throttle_value.model.add_value_changed_fn(
+                        lambda m: [
+                            self._master_throttle_slider.model.set_value(m.get_value_as_float()),
+                            self._delegate.on_master_throttle_changed(m.get_value_as_float())
+                        ]
+                    )
+                )
+
+                ui.Spacer(height=WidgetWindow.GENERAL_SPACING)

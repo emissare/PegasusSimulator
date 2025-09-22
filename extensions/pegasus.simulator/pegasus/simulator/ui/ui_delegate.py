@@ -19,14 +19,13 @@ import omni.kit.window.file_exporter
 from pxr import Usd, Sdf
 
 # Extension Configurations
-from pegasus.simulator.params import ROBOTS, SIMULATION_ENVIRONMENTS, WORLD_SETTINGS, ASSET_PATH
+from pegasus.simulator.params import VEHICLES, SIMULATION_ENVIRONMENTS, WORLD_SETTINGS, ASSET_PATH
 from pegasus.simulator.logic.interface.pegasus_interface import PegasusInterface
 
 # Vehicle Manager to spawn Vehicles
 from pegasus.simulator.logic.backends import PX4MavlinkBackend, PX4MavlinkBackendConfig
-from pegasus.simulator.logic.vehicles.multirotor import Multirotor, MultirotorConfig
+from pegasus.simulator.logic.vehicles.multirotor import Multirotor
 from pegasus.simulator.logic.vehicle_manager import VehicleManager
-from pegasus.simulator.logic.graphical_sensors.monocular_camera import MonocularCamera
 
 
 class UIDelegate:
@@ -38,6 +37,9 @@ class UIDelegate:
 
         # The window that will be bound to this delegate
         self._window = None
+
+        # Flag to prevent duplicate cleanup calls
+        self._cleaned_up = False
 
         # Get an instance of the pegasus simulator
         self._pegasus_sim: PegasusInterface = PegasusInterface()
@@ -56,7 +58,7 @@ class UIDelegate:
 
         # Attribute that hold the currently selected vehicle from the dropdown menu
         self._vehicle_dropdown: ui.AbstractItemModel = None
-        self._vehicles_names = list(ROBOTS.keys())
+        self._vehicles_names = list(VEHICLES.keys())
 
         # Get an instance of the vehicle manager
         self._vehicle_manager = VehicleManager()
@@ -186,7 +188,7 @@ class UIDelegate:
                 vehicle_index = self._vehicle_dropdown.get_item_value_model().as_int
 
                 # Get the name of the selected vehicle
-                selected_robot = self._vehicles_names[vehicle_index]
+                selected_vehicle = self._vehicles_names[vehicle_index]
 
                 # Get the id of the selected vehicle
                 self._vehicle_id = self._vehicle_id_field.get_value_as_int()
@@ -194,93 +196,47 @@ class UIDelegate:
                 # Get the desired position and orientation of the vehicle from the UI transform
                 pos, euler_angles = self._window.get_selected_vehicle_attitude()
 
-                # Create PX4 backend (only backend supported)
-                # Read if we should auto-start px4 from the checkbox
-                px4_autostart = self._px4_autostart_checkbox.get_value_as_bool()
+                # The Multirotor class now handles PX4 backend configuration internally from YAML
 
-                # Read the PX4 path from the field
-                px4_path = os.path.expanduser(self._px4_directory_field.get_value_as_string())
-
-                # Read the PX4 airframe from the field
-                px4_airframe = self._px4_airframe_field.get_value_as_string()
-
-                backend_config = PX4MavlinkBackendConfig({
-                    "vehicle_id": self._vehicle_id,
-                    "px4_autolaunch": px4_autostart,
-                    "px4_dir": px4_path,
-                    "px4_vehicle_model": px4_airframe
-                })
-                backend = PX4MavlinkBackend(config=backend_config)
-                   
-                # Create the multirotor configuration
-                config_multirotor = MultirotorConfig()
-                config_multirotor.backends = [backend]
-                config_multirotor.graphical_sensors = [MonocularCamera("camera", config={"update_rate": 60.0})]
-
-                # Clean up any existing vehicle before loading a new one
+                # Clean up any existing vehicle before loading a new one (BUILD: v2)
                 vehicle_path = "/World/quadrotor"
-
-                # Clear all callbacks for the vehicle path to prevent conflicts
-                callback_paths = [
-                    f"{vehicle_path}/state",
-                    f"{vehicle_path}/update",
-                    f"{vehicle_path}/start_stop_sim",
-                    f"{vehicle_path}/Sensors",
-                    f"{vehicle_path}/GraphicalSensors",
-                    f"{vehicle_path}/mav_state"
-                ]
-
-                carb.log_info(f"Clearing callbacks for {vehicle_path}")
-                for callback_path in callback_paths:
-                    try:
-                        self._pegasus_sim.world.remove_physics_callback(callback_path)
-                    except Exception as e:
-                        carb.log_info(f"Physics callback {callback_path} not found or already removed: {e}")
-
-                    try:
-                        self._pegasus_sim.world.remove_render_callback(callback_path)
-                    except Exception as e:
-                        carb.log_info(f"Render callback {callback_path} not found or already removed: {e}")
-
-                    try:
-                        self._pegasus_sim.world.remove_timeline_callback(callback_path)
-                    except Exception as e:
-                        carb.log_info(f"Timeline callback {callback_path} not found or already removed: {e}")
+                carb.log_info(f"YAML Vehicle Loading - Build v2 - Cleaning up {vehicle_path}")
 
                 # Check if vehicle exists in VehicleManager and clean it up
                 existing_vehicle = self._vehicle_manager.get_vehicle(vehicle_path)
                 if existing_vehicle:
-                    carb.log_info(f"Removing existing vehicle at {vehicle_path}")
+                    carb.log_info(f"Removing existing vehicle from VehicleManager: {vehicle_path}")
                     # Remove from Isaac Sim scene first
-                    self._pegasus_sim.world.scene.remove_object(existing_vehicle)
+                    try:
+                        self._pegasus_sim.world.scene.remove_object(existing_vehicle)
+                    except:
+                        pass  # Object might not be in scene
                     # Remove from VehicleManager
                     self._vehicle_manager.remove_vehicle(vehicle_path)
-                    # Delete the vehicle object
-                    del existing_vehicle
 
                 # Check if prim exists in stage and remove it
                 stage = omni.usd.get_context().get_stage()
                 if stage:
                     existing_prim = stage.GetPrimAtPath(vehicle_path)
                     if existing_prim and existing_prim.IsValid():
-                        carb.log_info(f"Removing existing prim at {vehicle_path}")
+                        carb.log_info(f"Removing existing prim from stage: {vehicle_path}")
                         stage.RemovePrim(vehicle_path)
 
-                # Try to spawn the selected robot in the world to the specified namespace
+                # Try to spawn the selected vehicle in the world to the specified namespace
+                # VEHICLES[selected_vehicle] now contains path to YAML config file
                 Multirotor(
-                    "/World/quadrotor",
-                    ROBOTS[selected_robot],
-                    self._vehicle_id,
-                    pos,
-                    Rotation.from_euler("XYZ", euler_angles, degrees=True).as_quat(),
-                    config=config_multirotor,
+                    stage_prefix="/World/quadrotor",
+                    config_file=VEHICLES[selected_vehicle],
+                    vehicle_id=self._vehicle_id,
+                    init_pos=pos,
+                    init_orientation=Rotation.from_euler("XYZ", euler_angles, degrees=True).as_quat(),
                 )
 
             # Log that a vehicle of the type multirotor was spawned in the world via the extension UI
-                carb.log_info("Spawned the robot: " + selected_robot + " using the Pegasus Simulator UI")
+                carb.log_info("Spawned the vehicle: " + selected_vehicle + " using the Pegasus Simulator UI")
             else:
                 # Log that it was not possible to spawn the vehicle in the world using the Pegasus Simulator UI
-                carb.log_error("Could not spawn the robot using the Pegasus Simulator UI")
+                carb.log_error("Could not spawn the vehicle using the Pegasus Simulator UI")
 
         # Run the actual vehicle spawn async so that the UI does not freeze
         asyncio.ensure_future(async_load_vehicle())        
@@ -500,3 +456,278 @@ class UIDelegate:
             export_handler=save_vehicle_callback,
             filename_url=os.path.join(ASSET_PATH, "Robots", "vehicle.usd")
         )
+
+    # ========================================
+    # Gimbal Control Methods
+    # ========================================
+
+    def on_gimbal_enabled_changed(self, enabled: bool):
+        """
+        Called when gimbal control is enabled/disabled
+        """
+        carb.log_info(f"Gimbal control {'enabled' if enabled else 'disabled'}")
+        # TODO: Enable/disable gimbal control in the vehicle
+        self._gimbal_enabled = enabled
+
+    def on_gimbal_pitch_changed(self, pitch: float):
+        """
+        Called when gimbal pitch slider changes
+        """
+        if hasattr(self, '_gimbal_enabled') and self._gimbal_enabled:
+            carb.log_info(f"Gimbal pitch changed to: {pitch}°")
+            self._send_gimbal_command(pitch=pitch)
+
+    def on_gimbal_roll_changed(self, roll: float):
+        """
+        Called when gimbal roll slider changes
+        """
+        if hasattr(self, '_gimbal_enabled') and self._gimbal_enabled:
+            carb.log_info(f"Gimbal roll changed to: {roll}°")
+            self._send_gimbal_command(roll=roll)
+
+    def on_gimbal_yaw_changed(self, yaw: float):
+        """
+        Called when gimbal yaw slider changes
+        """
+        if hasattr(self, '_gimbal_enabled') and self._gimbal_enabled:
+            carb.log_info(f"Gimbal yaw changed to: {yaw}°")
+            self._send_gimbal_command(yaw=yaw)
+
+    def on_gimbal_preset_clicked(self, pitch: float, roll: float, yaw: float):
+        """
+        Called when a gimbal preset button is clicked
+        """
+        if hasattr(self, '_gimbal_enabled') and self._gimbal_enabled:
+            carb.log_info(f"Gimbal preset: pitch={pitch}°, roll={roll}°, yaw={yaw}°")
+            self._send_gimbal_command(pitch=pitch, roll=roll, yaw=yaw)
+
+    def on_gimbal_stabilize_clicked(self):
+        """
+        Called when stabilize mode button is clicked
+        """
+        carb.log_info("Gimbal stabilize mode activated")
+        # TODO: Enable gimbal stabilization
+        self._gimbal_mode = "stabilize"
+
+    def on_gimbal_manual_clicked(self):
+        """
+        Called when manual mode button is clicked
+        """
+        carb.log_info("Gimbal manual mode activated")
+        # TODO: Disable gimbal stabilization
+        self._gimbal_mode = "manual"
+
+    def _send_gimbal_command(self, pitch=None, roll=None, yaw=None):
+        """
+        Send gimbal command to the active vehicle via MAVLink
+        """
+        try:
+            # Get the current active vehicle
+            vehicle_manager = VehicleManager.get_vehicle_manager()
+            vehicles = vehicle_manager.vehicles
+
+            if not vehicles:
+                carb.log_warn("No vehicles available for gimbal control")
+                return
+
+            # Get the first vehicle (or implement vehicle selection)
+            vehicle_id = list(vehicles.keys())[0]
+            vehicle = vehicles[vehicle_id]
+
+            # Find gimbal system in vehicle's graphical sensors
+            gimbal_system = None
+            for sensor in vehicle._graphical_sensors:
+                if hasattr(sensor, 'set_angles'):  # Check if it's a gimbal system
+                    gimbal_system = sensor
+                    break
+
+            if gimbal_system is None:
+                carb.log_warn("No gimbal system found in vehicle")
+                return
+
+            # Get current angles if not all specified
+            current_angles = gimbal_system._gimbal_angles
+            new_pitch = pitch if pitch is not None else current_angles.get('pitch', 0)
+            new_roll = roll if roll is not None else current_angles.get('roll', 0)
+            new_yaw = yaw if yaw is not None else current_angles.get('yaw', 0)
+
+            # Send command to gimbal system
+            gimbal_system.set_angles(new_pitch, new_roll, new_yaw)
+
+            # Also send MAVLink command if vehicle has PX4 backend
+            self._send_mavlink_gimbal_command(new_pitch, new_roll, new_yaw, vehicle)
+
+        except Exception as e:
+            carb.log_error(f"Failed to send gimbal command: {str(e)}")
+
+    def _send_mavlink_gimbal_command(self, pitch: float, roll: float, yaw: float, vehicle):
+        """
+        Send MAVLink gimbal command to PX4 backend
+        """
+        try:
+            # Find PX4 backend
+            px4_backend = None
+            for backend in vehicle._backends:
+                if isinstance(backend, PX4MavlinkBackend):
+                    px4_backend = backend
+                    break
+
+            if px4_backend is None:
+                carb.log_warn("No PX4 MAVLink backend found for gimbal control")
+                return
+
+            # TODO: Implement MAVLink gimbal command sending
+            # This would involve creating a gimbal_device_set_attitude message
+            # and sending it through the MAVLink connection
+
+            carb.log_info(f"Sending MAVLink gimbal command: pitch={pitch}°, roll={roll}°, yaw={yaw}°")
+
+            # For now, just log the command
+            # In a full implementation, this would create and send a MAVLink message:
+            # - MAV_CMD_DO_GIMBAL_MANAGER_PITCHYAW
+            # - or GIMBAL_DEVICE_SET_ATTITUDE message
+
+        except Exception as e:
+            carb.log_error(f"Failed to send MAVLink gimbal command: {str(e)}")
+
+    def on_manual_motor_enabled_changed(self, enabled: bool):
+        """
+        Handle manual motor control enable/disable checkbox change.
+
+        Args:
+            enabled (bool): True if manual control is enabled
+        """
+        try:
+            # Get the current active vehicle
+            vehicle_manager = VehicleManager.get_vehicle_manager()
+            vehicles = vehicle_manager.vehicles
+
+            if not vehicles:
+                carb.log_warn("No vehicles loaded for motor control")
+                return
+
+            # Get the first vehicle (assuming single vehicle for now)
+            vehicle = next(iter(vehicles.values()))
+
+            if enabled:
+                vehicle.enable_manual_control()
+                carb.log_info("Manual motor control enabled")
+            else:
+                vehicle.disable_manual_control()
+                carb.log_info("Manual motor control disabled")
+
+        except Exception as e:
+            carb.log_error(f"Failed to toggle manual motor control: {str(e)}")
+
+    def on_motor_speed_changed(self, motor_index: int, speed: float):
+        """
+        Handle individual motor speed change.
+
+        Args:
+            motor_index (int): Motor index (0-3)
+            speed (float): Motor speed percentage (0-100)
+        """
+        try:
+            # Get the current active vehicle
+            vehicle_manager = VehicleManager.get_vehicle_manager()
+            vehicles = vehicle_manager.vehicles
+
+            if not vehicles:
+                return
+
+            # Get the first vehicle (assuming single vehicle for now)
+            vehicle = next(iter(vehicles.values()))
+
+            if vehicle.is_manual_control_enabled():
+                # Get current motor speeds and update the specified motor
+                current_speeds = vehicle._manual_motor_speeds
+
+                # Convert rad/s back to percentage to get current values
+                current_percentages = [(s / 1000.0) * 100.0 for s in current_speeds]
+
+                # Update the specific motor
+                if 0 <= motor_index < 4:
+                    current_percentages[motor_index] = speed
+                    vehicle.set_manual_motor_speeds(current_percentages)
+
+        except Exception as e:
+            carb.log_error(f"Failed to set motor {motor_index} speed: {str(e)}")
+
+    def on_master_throttle_changed(self, throttle: float):
+        """
+        Handle master throttle change (sets all motors to same value).
+
+        Args:
+            throttle (float): Throttle percentage (0-100)
+        """
+        try:
+            # Get the current active vehicle
+            vehicle_manager = VehicleManager.get_vehicle_manager()
+            vehicles = vehicle_manager.vehicles
+
+            if not vehicles:
+                return
+
+            # Get the first vehicle (assuming single vehicle for now)
+            vehicle = next(iter(vehicles.values()))
+
+            if vehicle.is_manual_control_enabled():
+                # Set all motors to the same throttle value
+                motor_speeds = [throttle, throttle, throttle, throttle]
+                vehicle.set_manual_motor_speeds(motor_speeds)
+
+                # Update UI sliders to reflect the master throttle
+                if self._window:
+                    for i in range(4):
+                        if len(self._window._motor_sliders) > i:
+                            self._window._motor_sliders[i].model.set_value(throttle)
+                            self._window._motor_values[i].model.set_value(throttle)
+
+        except Exception as e:
+            carb.log_error(f"Failed to set master throttle: {str(e)}")
+
+    def cleanup(self):
+        """
+        Clean up all references to enable proper extension reload.
+        """
+        if self._cleaned_up:
+            carb.log_info("UIDelegate cleanup already completed, skipping")
+            return
+
+        carb.log_info("UIDelegate cleanup started")
+        self._cleaned_up = True
+
+        # Clear window reference to break circular reference
+        self._window = None
+
+        # Clear all UI model references
+        self._scene_dropdown = None
+        self._latitude_field = None
+        self._longitude_field = None
+        self._altitude_field = None
+        self._vehicle_dropdown = None
+        self._vehicle_id_field = None
+        self._px4_autostart_checkbox = None
+        self._px4_directory_field = None
+        self._px4_airframe_field = None
+
+        # Clear scene and vehicle name lists
+        self._scene_names = None
+        self._vehicles_names = None
+
+        # Clear manager and interface references
+        self._vehicle_manager = None
+
+        # Clear PegasusInterface reference and reset singleton
+        if self._pegasus_sim:
+            # Clear our reference
+            self._pegasus_sim = None
+
+            # Reset the singleton instance to ensure clean reload
+            try:
+                from pegasus.simulator.logic.interface.pegasus_interface import PegasusInterface
+                PegasusInterface.reset_singleton()
+            except Exception as e:
+                carb.log_warn(f"Could not reset PegasusInterface singleton: {str(e)}")
+
+        carb.log_info("UIDelegate cleanup completed")

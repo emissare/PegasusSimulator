@@ -26,24 +26,28 @@ CONFIG_FILE = ROOT + "/pegasus.simulator/config/configs.yaml"
 
 # Define the Extension Assets Path
 ASSET_PATH = ROOT + "/pegasus.simulator/pegasus/simulator/assets"
-ROBOTS_ASSETS = ASSET_PATH + "/Robots"
 
-# Function to refresh robots list
-def refresh_robots():
-    """Refresh the ROBOTS dictionary by scanning the assets directory"""
-    global ROBOTS
-    ROBOTS = {}
-    if os.path.exists(ROBOTS_ASSETS):
-        # Find all .usd and .usda files
-        for file_path in glob.glob(os.path.join(ROBOTS_ASSETS, "**/*.usd*"), recursive=True):
+# Define the vehicles config path
+VEHICLES_CONFIG_PATH = ROOT + "/pegasus.simulator/config/vehicles"
+
+# Function to refresh vehicles list from YAML configs
+def refresh_vehicles():
+    """Refresh the VEHICLES dictionary by scanning for YAML vehicle configurations"""
+    global VEHICLES
+    VEHICLES = {}
+    if os.path.exists(VEHICLES_CONFIG_PATH):
+        # Find all .yaml files in the vehicles config directory
+        for file_path in glob.glob(os.path.join(VEHICLES_CONFIG_PATH, "*.yaml")):
             # Get the filename without extension as the display name
             filename = os.path.basename(file_path)
             name = os.path.splitext(filename)[0]
-            ROBOTS[name] = file_path
-    return ROBOTS
+            # Make the name more user-friendly by replacing underscores with spaces and capitalizing
+            display_name = name.replace("_", " ").title()
+            VEHICLES[display_name] = file_path
+    return VEHICLES
 
-# Dynamically scan for robots/vehicles
-ROBOTS = refresh_robots()
+# Dynamically scan for YAML vehicle configurations
+VEHICLES = refresh_vehicles()
 
 # Setup the default simulation environments path
 NVIDIA_ASSETS_PATH = str(nucleus.get_assets_root_path())
@@ -111,8 +115,8 @@ WORLD_SETTINGS = {
 }
 DEFAULT_WORLD_SETTINGS = WORLD_SETTINGS['px4']
 
-# Define where the thumbnail of the vehicle is located
-THUMBNAIL = ROBOTS_ASSETS + "/Iris/iris_thumbnail.png"
+# Define where the thumbnail of the vehicle is located (generic vehicle thumbnail)
+THUMBNAIL = ROOT + "/pegasus.simulator/data/preview.png"
 
 # Define where the thumbail of the world is located
 WORLD_THUMBNAIL = ASSET_PATH + "/Worlds/Empty_thumbnail.png"

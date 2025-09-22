@@ -1,0 +1,61 @@
+# Quadrotor with Multi-Sensor Gimbal Configuration
+# Complete platform for sensor testing and payload operations
+
+vehicle:
+  type: "quadrotor_x"           # Standard X configuration
+  name: "Survey Quadrotor"      # Display name
+
+  # Physical configuration
+  rotor_separation: 0.35        # meters - slightly larger for gimbal payload
+  mass: 2.2                     # kg - increased mass for gimbal and sensors
+  motor: "E_Max_RS2205_2300KV"  # More powerful motor for payload
+
+  # Body configuration
+  body:
+    dimensions: [0.35, 0.35, 0.1]  # [length, width, height] in meters
+    color: [50, 50, 150]           # RGB color - blue for survey vehicle
+
+  # Standard sensors
+  sensors:
+    imu:
+      enabled: true
+      frequency: 250              # Hz
+      position: [0.0, 0.0, 0.0]   # Center of body
+
+    gps:
+      enabled: true
+      frequency: 10               # Hz
+      position: [0.0, 0.0, 0.03]  # Higher for antenna clearance
+
+    barometer:
+      enabled: true
+      frequency: 50               # Hz
+      position: [0.0, 0.0, 0.02]  # Near center
+
+  # Gimbal configuration
+  gimbal:
+    enabled: true
+    config_file: "config/gimbals/multi_sensor_gimbal.yaml"
+    mount_position: [0.0, 0.0, -0.08]  # Below body center
+
+    # Gimbal controller settings
+    control:
+      mode: "position"            # Position control mode
+      stabilization: true         # Enable attitude stabilization
+      default_attitude:
+        pitch: -90                # Point downward by default
+        roll: 0
+        yaw: 0
+
+# Enhanced capabilities with gimbal:
+# - Multi-sensor payload (color, mono, rangefinder)
+# - Stabilized imaging platform
+# - Companion computer control interface
+# - MAVLink gimbal protocol support
+
+# Use cases:
+# - Aerial surveying and mapping
+# - Inspection and monitoring
+# - Search and rescue operations
+# - Computer vision algorithm testing
+# - Multi-sensor data fusion development

@@ -1,13 +1,20 @@
 """
 | File: multirotor.py
 | Author: Marcelo Jacinto (marcelo.jacinto@tecnico.ulisboa.pt)
+| Modified by: EmissarePegasusSimulator Team
 | License: BSD-3-Clause. Copyright (c) 2024, Marcelo Jacinto. All rights reserved.
-| Description: Definition of the Multirotor class which is used as the base for all the multirotor vehicles.
+| Description: Programmatic multirotor vehicle creation from YAML configuration
 """
 
+import yaml
 import numpy as np
+from pathlib import Path
 
-from omni.isaac.dynamic_control import _dynamic_control
+# Isaac Sim imports
+import carb
+from isaacsim.core.api.objects import DynamicCuboid, DynamicCylinder
+from isaacsim.core.prims import RigidPrim
+from pxr import UsdGeom, UsdPhysics, Gf
 
 # The vehicle interface
 from pegasus.simulator.logic.vehicles.vehicle import Vehicle
@@ -20,72 +27,317 @@ from pegasus.simulator.logic.dynamics import LinearDrag
 from pegasus.simulator.logic.thrusters import QuadraticThrustCurve
 from pegasus.simulator.logic.sensors import Barometer, IMU, Magnetometer, GPS
 
-class MultirotorConfig:
-    """
-    A data class that is used for configuring a Multirotor
-    """
+# For gimbal support
+from pegasus.simulator.logic.graphical_sensors.gimbal_system import GimbalSystem
 
-    def __init__(self):
-        """
-        Initialization of the MultirotorConfig class
-        """
 
-        # Stage prefix of the vehicle when spawning in the world
-        self.stage_prefix = "quadrotor"
-
-        # The USD file that describes the visual aspect of the vehicle (and some properties such as mass and moments of inertia)
-        self.usd_file = ""
-
-        # The default thrust curve for a quadrotor and dynamics relating to drag
-        self.thrust_curve = QuadraticThrustCurve()
-        self.drag = LinearDrag([0.50, 0.30, 0.0])
-
-        # The default sensors for a quadrotor
-        self.sensors = [Barometer(), IMU(), Magnetometer(), GPS()]
-
-        # The default graphical sensors for a quadrotor
-        self.graphical_sensors = []
-
-        # The default omnigraphs for a quadrotor
-        self.graphs = []
-
-        # The backends for actually sending commands to the vehicle. By default use mavlink (with default mavlink configurations)
-        # [Can be None as well, if we do not desired to use PX4 with this simulated vehicle]. It can also be a ROS2 backend
-        # or your own custom Backend implementation!
-        self.backends = [PX4MavlinkBackend(config=PX4MavlinkBackendConfig())]
 
 
 class Multirotor(Vehicle):
-    """Multirotor class - It defines a base interface for creating a multirotor
     """
+    Creates multirotor vehicles entirely from YAML configuration without USD files.
+    Supports symmetric quadrotor_x configuration with configurable parameters.
+    """
+
     def __init__(
         self,
         # Simulation specific configurations
         stage_prefix: str = "quadrotor",
-        usd_file: str = "",
+        config_file: str = "",  # YAML config file path (required)
         vehicle_id: int = 0,
         # Spawning pose of the vehicle
         init_pos=[0.0, 0.0, 0.07],
         init_orientation=[0.0, 0.0, 0.0, 1.0],
-        config=MultirotorConfig(),
     ):
-        """Initializes the multirotor object
+        """Initializes the multirotor object from YAML configuration
 
         Args:
             stage_prefix (str): The name the vehicle will present in the simulator when spawned. Defaults to "quadrotor".
-            usd_file (str): The USD file that describes the looks and shape of the vehicle. Defaults to "".
+            config_file (str): Path to vehicle YAML configuration file (required).
             vehicle_id (int): The id to be used for the vehicle. Defaults to 0.
             init_pos (list): The initial position of the vehicle in the inertial frame (in ENU convention). Defaults to [0.0, 0.0, 0.07].
             init_orientation (list): The initial orientation of the vehicle in quaternion [qx, qy, qz, qw]. Defaults to [0.0, 0.0, 0.0, 1.0].
-            config (MultirotorConfig, optional): Defaults to MultirotorConfig().
         """
 
-        # 1. Initiate the Vehicle object itself
-        super().__init__(stage_prefix, usd_file, init_pos, init_orientation, config.sensors, config.graphical_sensors, config.graphs, config.backends)
+        # Store stage prefix immediately (needed for __del__ if initialization fails) - BUILD v2
+        self._stage_prefix = stage_prefix
+        carb.log_info(f"Multirotor BUILD v2 - Initializing with config: {config_file}")
 
-        # 2. Setup the dynamics of the system - get the thrust curve of the vehicle from the configuration
-        self._thrusters = config.thrust_curve
-        self._drag = config.drag
+        # Validate config file parameter
+        if not config_file:
+            raise ValueError("config_file parameter is required - must specify path to YAML vehicle configuration")
+
+        # Load vehicle configuration from YAML
+        config_path = Path(config_file)
+        if not config_path.exists():
+            raise FileNotFoundError(f"Vehicle config file not found: {config_file}")
+
+        with open(config_path, 'r') as f:
+            self.vehicle_config = yaml.safe_load(f)
+
+        # Load motor database using path utilities
+        from pegasus.simulator.utils.paths import get_motor_db_path, ensure_config_file_exists
+
+        motor_db_path = ensure_config_file_exists(get_motor_db_path(), "motor database")
+        with open(motor_db_path, 'r') as f:
+            motor_database = yaml.safe_load(f)
+
+        # Get motor parameters
+        motor_name = self.vehicle_config['vehicle']['motor']
+        if motor_name not in motor_database['motors']:
+            raise ValueError(f"Motor '{motor_name}' not found in motor database")
+        self.motor_params = motor_database['motors'][motor_name]
+
+        # Extract vehicle parameters
+        self.vehicle_type = self.vehicle_config['vehicle']['type']
+        self.rotor_separation = self.vehicle_config['vehicle']['rotor_separation']
+        self.vehicle_mass = self.vehicle_config['vehicle']['mass']
+
+        # Setup sensors, thrusters, and backends first
+        sensors, graphical_sensors, graphs, backends = self._setup_vehicle_components()
+
+        # Initialize parent Vehicle class WITHOUT USD file (empty string)
+        super().__init__(
+            stage_prefix,
+            "",
+            init_pos,
+            init_orientation,
+            sensors,
+            graphical_sensors,
+            graphs,
+            backends
+        )
+
+        # Manual motor control attributes
+        self._manual_control_enabled = False
+        self._manual_motor_speeds = [0.0, 0.0, 0.0, 0.0]  # Angular velocities in rad/s
+
+        # Create vehicle structure programmatically AFTER parent class initialization
+        self._create_vehicle_structure(stage_prefix)
+
+    def _create_vehicle_structure(self, stage_prefix: str):
+        """
+        Create the vehicle structure programmatically based on vehicle type.
+        """
+        if self.vehicle_type == "quadrotor_x":
+            self._create_quadrotor_x_structure(stage_prefix)
+        else:
+            raise ValueError(f"Unsupported vehicle type: {self.vehicle_type}")
+
+    def _create_quadrotor_x_structure(self, stage_prefix: str):
+        """
+        Create quadrotor X configuration structure with rotors at 45° angles.
+        Matches the current Iris motor rotation pattern.
+        """
+
+        # Standard X configuration rotor positions (above body)
+        separation = self.rotor_separation
+        rotor_height = 0.1  # 10cm above body
+        rotor_positions = [
+            [separation/2, separation/2, rotor_height],    # Front-right
+            [-separation/2, separation/2, rotor_height],   # Front-left
+            [-separation/2, -separation/2, rotor_height],  # Rear-left
+            [separation/2, -separation/2, rotor_height]    # Rear-right
+        ]
+
+        # Standard rotation directions (matching current Iris: [-1, -1, 1, 1])
+        rotor_directions = [-1, -1, 1, 1]  # CCW, CCW, CW, CW
+
+        # Build the multirotor structure
+        self._build_multirotor_structure(stage_prefix, rotor_positions, rotor_directions)
+
+    def _build_multirotor_structure(self, stage_prefix: str, rotor_positions: list, rotor_directions: list):
+        """
+        Build the physical multirotor structure with body and rotors.
+        """
+
+        # Create main body
+        self._create_body(stage_prefix)
+
+        # Create rotors
+        for i, (pos, direction) in enumerate(zip(rotor_positions, rotor_directions)):
+            self._create_rotor(stage_prefix, i, pos, direction)
+
+        # Create gimbal mount if enabled
+        if self.vehicle_config['vehicle'].get('gimbal', {}).get('enabled', False):
+            self._create_gimbal_mount(stage_prefix)
+
+        # Setup articulation root after all structure is created
+        self._setup_articulation(stage_prefix)
+
+    def _create_body(self, stage_prefix: str):
+        """
+        Create the main body of the vehicle as a DynamicCuboid.
+        """
+
+        body_config = self.vehicle_config['vehicle']['body']
+        dimensions = body_config['dimensions']
+        color = body_config['color']
+
+        # Create dynamic cuboid for the body
+        self.body = DynamicCuboid(
+            prim_path=f"{stage_prefix}/body",
+            name="body",
+            position=np.array([0.0, 0.0, 0.0]),
+            size=max(dimensions),  # DynamicCuboid uses single size parameter
+            scale=np.array([
+                dimensions[0] / max(dimensions),
+                dimensions[1] / max(dimensions),
+                dimensions[2] / max(dimensions)
+            ]),
+            color=np.array(color),
+            mass=self.vehicle_mass
+        )
+
+    def _create_rotor(self, stage_prefix: str, rotor_index: int, position: list, direction: int):
+        """
+        Create a single rotor disk at the specified position with the given rotation direction.
+        """
+
+        rotor_radius = self.motor_params['rotor_radius']
+
+        # Create single rotor rigid body that can receive forces
+        rotor = DynamicCylinder(
+            prim_path=f"{stage_prefix}/rotor{rotor_index}",
+            name=f"rotor{rotor_index}",
+            position=np.array(position),
+            radius=rotor_radius,
+            height=0.01,  # Thin disk to represent rotor
+            color=np.array([50, 50, 50]),  # Dark gray
+            mass=0.05  # Total rotor mass
+        )
+
+        # Add revolute joint for visual spinning effect
+        self._add_rotor_joint(stage_prefix, rotor_index)
+
+    def _add_rotor_joint(self, stage_prefix: str, rotor_index: int):
+        """
+        Add a revolute joint to a rotor for visual rotation effects.
+        """
+
+        # Get USD stage
+        from omni.usd import get_context
+        stage = get_context().get_stage()
+
+        # Create revolute joint for the rotor
+        joint_path = f"{stage_prefix}/joint{rotor_index}"
+        joint = UsdPhysics.RevoluteJoint.Define(stage, joint_path)
+
+        # Set joint properties
+        joint.CreateAxisAttr("Z")  # Rotation around Z-axis
+        joint.CreateBody0Rel().SetTargets([f"{stage_prefix}/body"])
+        joint.CreateBody1Rel().SetTargets([f"{stage_prefix}/rotor{rotor_index}"])
+
+        # Set joint limits (free rotation)
+        joint.CreateLowerLimitAttr(-3.14159)
+        joint.CreateUpperLimitAttr(3.14159)
+
+    def _create_gimbal_mount(self, stage_prefix: str):
+        """
+        Create gimbal mount point if gimbal is enabled.
+        """
+
+        gimbal_config = self.vehicle_config['vehicle']['gimbal']
+        mount_position = gimbal_config.get('mount_position', [0.0, 0.0, -0.05])
+
+        # Create mount point as a small cube
+        mount = DynamicCuboid(
+            prim_path=f"{stage_prefix}/gimbal_mount",
+            name="gimbal_mount",
+            position=np.array(mount_position),
+            size=0.03,  # Small mount
+            color=np.array([100, 100, 100]),
+            mass=0.1
+        )
+
+    def _setup_articulation(self, stage_prefix: str):
+        """
+        Apply ArticulationRootAPI to the vehicle root to create proper articulation.
+        This must be called AFTER all the vehicle structure is created.
+        """
+        from omni.usd import get_context
+        stage = get_context().get_stage()
+        root_prim = stage.GetPrimAtPath(stage_prefix)
+        UsdPhysics.ArticulationRootAPI.Apply(root_prim)
+
+    def _setup_vehicle_components(self):
+        """
+        Setup sensors, thrusters, dynamics, and backends based on configuration.
+        """
+
+        # Setup backends (always use PX4 MAVLink)
+        backends = [PX4MavlinkBackend(config=PX4MavlinkBackendConfig())]
+
+        # Setup sensors
+        sensors = []
+        sensor_config = self.vehicle_config['vehicle']['sensors']
+
+        if sensor_config.get('imu', {}).get('enabled', False):
+            imu_config = sensor_config['imu']
+            sensors.append(IMU({
+                "frequency": imu_config.get('frequency', 250),
+                "pos": imu_config.get('position', [0.0, 0.0, 0.0])
+            }))
+
+        if sensor_config.get('gps', {}).get('enabled', False):
+            gps_config = sensor_config['gps']
+            sensors.append(GPS({
+                "frequency": gps_config.get('frequency', 10),
+                "pos": gps_config.get('position', [0.0, 0.0, 0.02])
+            }))
+
+        if sensor_config.get('barometer', {}).get('enabled', False):
+            baro_config = sensor_config['barometer']
+            sensors.append(Barometer({
+                "frequency": baro_config.get('frequency', 50),
+                "pos": baro_config.get('position', [0.0, 0.0, 0.01])
+            }))
+
+        # Setup graphical sensors (including gimbal)
+        graphical_sensors = []
+
+        # Add gimbal if configured
+        if self.vehicle_config['vehicle'].get('gimbal', {}).get('enabled', False):
+            gimbal_config_file = self.vehicle_config['vehicle']['gimbal']['config_file']
+            gimbal_system = GimbalSystem(gimbal_config_file, "gimbal_mount")
+            graphical_sensors.append(gimbal_system)
+
+        # Setup thrust curve using motor parameters
+        thrust_curve = self._setup_thrust_curve()
+
+        # Setup drag
+        drag = LinearDrag([0.50, 0.30, 0.0])
+
+        # Setup graphs (empty for now)
+        graphs = []
+
+        # Store thrust curve and drag for vehicle dynamics
+        self._thrusters = thrust_curve
+        self._drag = drag
+
+        return sensors, graphical_sensors, graphs, backends
+
+    def _setup_thrust_curve(self):
+        """
+        Setup quadratic thrust curve using motor parameters from database.
+        """
+
+        # Extract motor parameters
+        rotor_constant = self.motor_params['rotor_constant']
+        rolling_moment_coeff = self.motor_params['rolling_moment_coefficient']
+        max_velocity = self.motor_params['max_rotor_velocity']
+
+        # Create thrust curve configuration
+        thrust_config = {
+            "num_rotors": 4,
+            "rotor_constant": [rotor_constant] * 4,
+            "rolling_moment_coefficient": [rolling_moment_coeff] * 4,
+            "rot_dir": [-1, -1, 1, 1],  # Match Iris configuration
+            "max_rotor_velocity": [max_velocity] * 4,
+            "min_rotor_velocity": [0.0] * 4,
+        }
+
+        return QuadraticThrustCurve(thrust_config)
 
     def start(self):
         """In this case we do not need to do anything extra when the simulation starts"""
@@ -95,134 +347,81 @@ class Multirotor(Vehicle):
         """In this case we do not need to do anything extra when the simulation stops"""
         pass
 
-    def update(self, dt: float):
+    def enable_manual_control(self):
+        """Enable manual motor control mode (overrides PX4 commands)"""
+        self._manual_control_enabled = True
+        carb.log_info("Manual motor control enabled - overriding PX4 commands")
+
+    def disable_manual_control(self):
+        """Disable manual motor control mode (returns to PX4 control)"""
+        self._manual_control_enabled = False
+        self._manual_motor_speeds = [0.0, 0.0, 0.0, 0.0]  # Reset to zero
+        carb.log_info("Manual motor control disabled - returning to PX4 control")
+
+    def set_manual_motor_speeds(self, motor_speeds):
         """
-        Method that computes and applies the forces to the vehicle in simulation based on the motor speed. 
-        This method must be implemented by a class that inherits this type. This callback
-        is called on every physics step.
+        Set manual motor speeds (0-100% converted to rad/s)
 
         Args:
-            dt (float): The time elapsed between the previous and current function calls (s).
+            motor_speeds (list): List of 4 motor speeds as percentages (0-100)
+        """
+        if len(motor_speeds) != 4:
+            carb.log_error("Motor speeds must be a list of 4 values")
+            return
+
+        # Convert percentage to angular velocity (assume max 1000 rad/s)
+        max_speed = 1000.0  # rad/s
+        self._manual_motor_speeds = [
+            (speed / 100.0) * max_speed for speed in motor_speeds
+        ]
+
+    def is_manual_control_enabled(self):
+        """Check if manual control is currently enabled"""
+        return self._manual_control_enabled
+
+    def update(self, dt: float):
+        """
+        Update method called at each physics step.
+        Apply forces and torques to the vehicle based on motor commands.
         """
 
         # Get the articulation root of the vehicle
         articulation = self.get_dc_interface().get_articulation(self._stage_prefix)
 
-        # Get the desired angular velocities for each rotor from the first backend (can be mavlink or other) expressed in rad/s
-        if len(self._backends) != 0:
+        # Get desired angular velocities from backends or manual control
+        if self._manual_control_enabled:
+            # Use manual motor speeds from UI
+            desired_rotor_velocities = self._manual_motor_speeds.copy()
+        elif len(self._backends) != 0:
+            # Normal PX4 control path
             desired_rotor_velocities = self._backends[0].input_reference()
         else:
-            desired_rotor_velocities = [0.0 for i in range(self._thrusters._num_rotors)]
+            desired_rotor_velocities = [0.0 for i in range(4)]
 
-        # Input the desired rotor velocities in the thruster model
+        # Update thruster model
         self._thrusters.set_input_reference(desired_rotor_velocities)
-
-        # Get the desired forces to apply to the vehicle
         forces_z, _, rolling_moment = self._thrusters.update(self._state, dt)
 
-        # Apply force to each rotor
+        # Apply forces to rotors
         for i in range(4):
+            self.apply_force([0.0, 0.0, forces_z[i]], body_part=f"/rotor{i}")
 
-            # Apply the force in Z on the rotor frame
-            self.apply_force([0.0, 0.0, forces_z[i]], body_part="/rotor" + str(i))
+            # Handle propeller visual effect
+            if forces_z[i] > 0.1:
+                # Get rotor joint and set velocity for visual effect
+                joint = self.get_dc_interface().find_articulation_dof(articulation, f"joint{i}")
+                if joint is not None:
+                    self.get_dc_interface().set_dof_velocity(
+                        joint, 100 * self._thrusters.rot_dir[i]
+                    )
 
-            # Generate the rotating propeller visual effect
-            self.handle_propeller_visual(i, forces_z[i], articulation)
-
-        # Apply the torque to the body frame of the vehicle that corresponds to the rolling moment
+        # Apply rolling moment to body
         self.apply_torque([0.0, 0.0, rolling_moment], "/body")
 
-        # Compute the total linear drag force to apply to the vehicle's body frame
+        # Apply drag forces
         drag = self._drag.update(self._state, dt)
         self.apply_force(drag, body_part="/body")
 
-        # Call the update methods in all backends
+        # Update all backends
         for backend in self._backends:
             backend.update(dt)
-
-    def handle_propeller_visual(self, rotor_number, force: float, articulation):
-        """
-        Auxiliar method used to set the joint velocity of each rotor (for animation purposes) based on the 
-        amount of force being applied on each joint
-
-        Args:
-            rotor_number (int): The number of the rotor to generate the rotation animation
-            force (float): The force that is being applied on that rotor
-            articulation (_type_): The articulation group the joints of the rotors belong to
-        """
-
-        # Rotate the joint to yield the visual of a rotor spinning (for animation purposes only)
-        joint = self.get_dc_interface().find_articulation_dof(articulation, "joint" + str(rotor_number))
-
-        # Spinning when armed but not applying force
-        if 0.0 < force < 0.1:
-            self.get_dc_interface().set_dof_velocity(joint, 5 * self._thrusters.rot_dir[rotor_number])
-        # Spinning when armed and applying force
-        elif 0.1 <= force:
-            self.get_dc_interface().set_dof_velocity(joint, 100 * self._thrusters.rot_dir[rotor_number])
-        # Not spinning
-        else:
-            self.get_dc_interface().set_dof_velocity(joint, 0)
-
-    def force_and_torques_to_velocities(self, force: float, torque: np.ndarray):
-        """
-        Auxiliar method used to get the target angular velocities for each rotor, given the total desired thrust [N] and
-        torque [Nm] to be applied in the multirotor's body frame.
-
-        Note: This method assumes a quadratic thrust curve. This method will be improved in a future update,
-        and a general thrust allocation scheme will be adopted. For now, it is made to work with multirotors directly.
-
-        Args:
-            force (np.ndarray): A vector of the force to be applied in the body frame of the vehicle [N]
-            torque (np.ndarray): A vector of the torque to be applied in the body frame of the vehicle [Nm]
-
-        Returns:
-            list: A list of angular velocities [rad/s] to apply in reach rotor to accomplish suchs forces and torques
-        """
-
-        # Get the body frame of the vehicle
-        rb = self.get_dc_interface().get_rigid_body(self._stage_prefix + "/body")
-
-        # Get the rotors of the vehicle
-        rotors = [self.get_dc_interface().get_rigid_body(self._stage_prefix + "/rotor" + str(i)) for i in range(self._thrusters._num_rotors)]
-
-        # Get the relative position of the rotors with respect to the body frame of the vehicle (ignoring the orientation for now)
-        relative_poses = self.get_dc_interface().get_relative_body_poses(rb, rotors)
-
-        # Define the alocation matrix
-        aloc_matrix = np.zeros((4, self._thrusters._num_rotors))
-        
-        # Define the first line of the matrix (T [N])
-        aloc_matrix[0, :] = np.array(self._thrusters._rotor_constant)                                           
-
-        # Define the second and third lines of the matrix (\tau_x [Nm] and \tau_y [Nm])
-        aloc_matrix[1, :] = np.array([relative_poses[i].p[1] * self._thrusters._rotor_constant[i] for i in range(self._thrusters._num_rotors)])
-        aloc_matrix[2, :] = np.array([-relative_poses[i].p[0] * self._thrusters._rotor_constant[i] for i in range(self._thrusters._num_rotors)])
-
-        # Define the forth line of the matrix (\tau_z [Nm])
-        aloc_matrix[3, :] = np.array([self._thrusters._rolling_moment_coefficient[i] * self._thrusters._rot_dir[i] for i in range(self._thrusters._num_rotors)])
-
-        # Compute the inverse allocation matrix, so that we can get the angular velocities (squared) from the total thrust and torques
-        aloc_inv = np.linalg.pinv(aloc_matrix)
-
-        # Compute the target angular velocities (squared)
-        squared_ang_vel = aloc_inv @ np.array([force, torque[0], torque[1], torque[2]])
-
-        # Making sure that there is no negative value on the target squared angular velocities
-        squared_ang_vel[squared_ang_vel < 0] = 0.0
-
-        # ------------------------------------------------------------------------------------------------
-        # Saturate the inputs while preserving their relation to each other, by performing a normalization
-        # ------------------------------------------------------------------------------------------------
-        max_thrust_vel_squared = np.power(self._thrusters.max_rotor_velocity[0], 2)
-        max_val = np.max(squared_ang_vel)
-
-        if max_val >= max_thrust_vel_squared:
-            normalize = np.maximum(max_val / max_thrust_vel_squared, 1.0)
-
-            squared_ang_vel = squared_ang_vel / normalize
-
-        # Compute the angular velocities for each rotor in [rad/s]
-        ang_vel = np.sqrt(squared_ang_vel)
-
-        return ang_vel

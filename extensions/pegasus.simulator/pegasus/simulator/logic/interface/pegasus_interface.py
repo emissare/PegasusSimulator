@@ -530,6 +530,18 @@ class PegasusInterface:
 
         return PegasusInterface._instance
 
+    @classmethod
+    def reset_singleton(cls):
+        """
+        Reset the singleton instance for clean extension reload.
+        This should be called during extension shutdown.
+        """
+        with cls._lock:
+            if cls._instance is not None:
+                carb.log_info("Resetting PegasusInterface singleton instance")
+                cls._instance = None
+                cls._is_initialized = False
+
     def __del__(self):
         """Destructor for the object. Destroys the only existing instance of this class."""
         PegasusInterface._instance = None

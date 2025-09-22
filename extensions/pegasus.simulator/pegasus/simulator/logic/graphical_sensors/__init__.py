@@ -5,4 +5,6 @@
 
 from .graphical_sensor import GraphicalSensor
 from .monocular_camera import MonocularCamera
+from .laser_rangefinder import LaserRangefinder
+from .gimbal_system import GimbalSystem
 #from .lidar import Lidar

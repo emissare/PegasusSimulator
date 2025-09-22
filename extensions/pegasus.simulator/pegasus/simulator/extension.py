@@ -9,6 +9,7 @@ __all__ = ["Pegasus_SimulatorExtension"]
 # Python garbage collenction and asyncronous API
 import gc
 import asyncio
+import weakref
 from functools import partial
 from threading import Timer
 
@@ -45,37 +46,61 @@ class Pegasus_SimulatorExtension(omni.ext.IExt):
         # Save the extension id
         self._ext_id = ext_id
 
+        # Initialize state tracking for clean lifecycle management
+        self._menu_created = False
+        self._window_created = False
+        self._workspace_registered = False
+
         # Create the UI of the app and its manager
         self.ui_delegate = None
         self.ui_window = None
 
         # Add the ability to show the window if the system requires it (QuickLayout feature)
-        ui.Workspace.set_show_window_fn(WINDOW_TITLE, partial(self.show_window, None))
+        ui.Workspace.set_show_window_fn(WINDOW_TITLE, self._create_show_window_callback())
+        self._workspace_registered = True
+        carb.log_info("Workspace show function registered")
 
         # Add the extension to the editor menu inside isaac sim
         editor_menu = omni.kit.ui.get_editor_menu()
         if editor_menu:
             self._menu = editor_menu.add_item(MENU_PATH, self.show_window, toggle=True, value=True)
+            self._menu_created = True
+            carb.log_info(f"Menu item created at path: {MENU_PATH}")
+        else:
+            carb.log_warn("Editor menu not available, skipping menu creation")
 
         # Show the window (It call the self.show_window)
+        carb.log_info(f"About to call ui.Workspace.show_window with WINDOW_TITLE='{WINDOW_TITLE}'")
         ui.Workspace.show_window(WINDOW_TITLE, show=True)
+        carb.log_info("ui.Workspace.show_window completed")
 
 
     def show_window(self, menu, show):
         """
         Method that controls whether a widget window is created or not
         """
+        carb.log_info(f"show_window called with menu={menu}, show={show}")
 
         if show == True:
-
-            # Create a window and its delegate
-            self.ui_delegate = UIDelegate()
-            self.ui_window = WidgetWindow(self.ui_delegate)
-            self.ui_window.set_visibility_changed_fn(self._visibility_changed_fn)
+            if not self._window_created:
+                # Create a window and its delegate
+                carb.log_info("Creating UIDelegate...")
+                self.ui_delegate = UIDelegate()
+                carb.log_info("Creating WidgetWindow...")
+                self.ui_window = WidgetWindow(self.ui_delegate)
+                carb.log_info(f"Window created successfully: {self.ui_window}")
+                self.ui_window.set_visibility_changed_fn(self._visibility_changed_fn)
+                self._window_created = True
+            else:
+                # Window already exists, just make it visible
+                if self.ui_window:
+                    self.ui_window.visible = True
+                    carb.log_info("Window already exists, made visible")
 
         # If we have a window and we are not supposed to show it, then change its visibility
         elif self.ui_window:
             self.ui_window.visible = False
+            carb.log_info("Window hidden")
 
     def _visibility_changed_fn(self, visible):
         """
@@ -98,39 +123,115 @@ class Pegasus_SimulatorExtension(omni.ext.IExt):
             editor_menu.set_value(MENU_PATH, visible)
 
     async def _destroy_window_async(self):
+        """
+        Async window destruction - only handles window and delegate cleanup
+        Menu and extension-level cleanup is handled in on_shutdown()
+        """
+        carb.log_info("Starting async window destruction")
 
         # Wait one frame before it gets destructed (from NVidia example)
         await omni.kit.app.get_app().next_update_async()
 
-        # Destroy the window UI if it exists
-        if self.ui_window:
+        # Only clean up window and delegate - not extension-level resources
+        if self._window_created and self.ui_window:
+            carb.log_info("Destroying window")
             self.ui_window.destroy()
             self.ui_window = None
+            self._window_created = False
+            carb.log_info("Window destroyed successfully")
+
+        # Clear delegate reference after window cleanup
+        if self.ui_delegate:
+            try:
+                carb.log_info("Calling UIDelegate cleanup from async destroy")
+                self.ui_delegate.cleanup()
+                carb.log_info("UIDelegate cleanup from async destroy completed")
+            except Exception as e:
+                carb.log_error(f"Failed UIDelegate cleanup from async destroy: {str(e)}")
+            self.ui_delegate = None
+        else:
+            carb.log_info("UIDelegate already None in async destroy")
+
+        carb.log_info("Async window destruction completed")
 
     def on_shutdown(self):
         """
         Callback called when the extension is shutdown
+        Handles only extension-level cleanup (menu, workspace registration)
+        Window cleanup is handled separately in _destroy_window_async()
         """
-        carb.log_info("Pegasus Isaac extension shutdown")
+        carb.log_info("Pegasus Isaac extension shutdown started")
 
-        # Destroy the isaac sim menu object
+        # Clean up extension-level resources in proper order
+
+        # 1. Remove editor menu item (if it was created)
+        if self._menu_created:
+            editor_menu = omni.kit.ui.get_editor_menu()
+            if editor_menu:
+                try:
+                    # Check if menu item exists before removal
+                    if editor_menu.get_menu_item(MENU_PATH) is not None:
+                        carb.log_info(f"Removing editor menu item: {MENU_PATH}")
+                        editor_menu.remove_item(MENU_PATH)
+                        carb.log_info("Editor menu item removed successfully")
+                    else:
+                        carb.log_info(f"Menu item {MENU_PATH} not found, skipping removal")
+                except Exception as e:
+                    carb.log_warn(f"Failed to remove editor menu item {MENU_PATH}: {str(e)}")
+            else:
+                carb.log_warn("Editor menu not available for cleanup")
+            self._menu_created = False
+        else:
+            carb.log_info("Menu was not created, skipping menu cleanup")
+
+        # Clear menu reference
         self._menu = None
 
-        # Destroy the window
-        if self.ui_window:
-            self.ui_window.destroy()
-            self.ui_window = None
+        # 2. Clean up window if it still exists (shouldn't normally happen)
+        if self._window_created:
+            carb.log_info("Window still exists during shutdown, cleaning up")
+            if self.ui_window:
+                self.ui_window.destroy()
+                self.ui_window = None
+            if self.ui_delegate:
+                try:
+                    carb.log_info("Calling UIDelegate cleanup from on_shutdown")
+                    self.ui_delegate.cleanup()
+                    carb.log_info("UIDelegate cleanup from on_shutdown completed")
+                except Exception as e:
+                    carb.log_error(f"Failed UIDelegate cleanup from on_shutdown: {str(e)}")
+                self.ui_delegate = None
+            self._window_created = False
+        else:
+            carb.log_info("Window already cleaned up, skipping window cleanup")
 
-        # Destroy the UI delegate
-        if self.ui_delegate:
-            self.ui_delegate = None
+        # 3. De-register workspace function (if it was registered)
+        if self._workspace_registered:
+            ui.Workspace.set_show_window_fn(WINDOW_TITLE, None)
+            self._workspace_registered = False
+            carb.log_info("Workspace show function unregistered")
+        else:
+            carb.log_info("Workspace function was not registered, skipping")
 
-        # De-register the function taht shows the window from the isaac sim ui
-        ui.Workspace.set_show_window_fn(WINDOW_TITLE, None)
+        # 4. Reset all state flags
+        self._menu_created = False
+        self._window_created = False
+        self._workspace_registered = False
 
-        editor_menu = omni.kit.ui.get_editor_menu()
-        if editor_menu:
-            editor_menu.remove_item(MENU_PATH)
+        carb.log_info("Pegasus Isaac extension shutdown completed")
 
         # Call the garbage collector
         gc.collect()
+
+    def _create_show_window_callback(self):
+        """
+        Create a weakref-based callback to avoid reference leaks
+        """
+        weak_self = weakref.ref(self)
+
+        def show_window_callback(show):
+            strong_self = weak_self()
+            if strong_self is not None:
+                strong_self.show_window(None, show)
+
+        return show_window_callback

@@ -1,0 +1,86 @@
+# Motor Database for EmissarePegasusSimulator
+# Predefined motor configurations with all thrust and physics parameters
+
+motors:
+  # T-Motor F40 Pro III 2400KV - Popular racing/freestyle motor
+  T_Motor_F40_2400KV:
+    description: "T-Motor F40 Pro III 2400KV - Racing/freestyle motor"
+    rotor_constant: 5.84e-6          # Thrust coefficient [N⋅s²/rad²]
+    rolling_moment_coefficient: 1.0e-6  # Torque coefficient [N⋅m⋅s²/rad²]
+    max_rotor_velocity: 1100         # Maximum angular velocity [rad/s]
+    rotor_radius: 0.076              # Rotor/propeller radius [m] (3 inch props)
+    recommended_props: "3x3, 3x4"
+    typical_applications: ["Racing", "Freestyle", "Mini quads"]
+
+  # E-Max RS2205 2300KV - Popular multirotor motor
+  E_Max_RS2205_2300KV:
+    description: "E-Max RS2205 2300KV - Reliable multirotor motor"
+    rotor_constant: 6.2e-6
+    rolling_moment_coefficient: 1.2e-6
+    max_rotor_velocity: 1050         # [rad/s]
+    rotor_radius: 0.089              # [m] (3.5 inch props)
+    recommended_props: "3.5x3, 4x4"
+    typical_applications: ["Photography", "Surveying", "General purpose"]
+
+  # T-Motor MN2214 920KV - Larger, more efficient motor
+  T_Motor_MN2214_920KV:
+    description: "T-Motor MN2214 920KV - High efficiency motor"
+    rotor_constant: 8.5e-6
+    rolling_moment_coefficient: 1.8e-6
+    max_rotor_velocity: 800          # [rad/s]
+    rotor_radius: 0.127              # [m] (5 inch props)
+    recommended_props: "5x3, 5x4"
+    typical_applications: ["Long endurance", "Heavy payload", "Professional"]
+
+  # Generic Small Motor - For testing and prototyping
+  Generic_Small:
+    description: "Generic small motor for testing"
+    rotor_constant: 4.5e-6
+    rolling_moment_coefficient: 0.8e-6
+    max_rotor_velocity: 1200         # [rad/s]
+    rotor_radius: 0.050              # [m] (2 inch props)
+    recommended_props: "2x2, 2.5x2"
+    typical_applications: ["Testing", "Indoor flight", "Micro quads"]
+
+  # Generic Medium Motor - Balanced performance
+  Generic_Medium:
+    description: "Generic medium motor for general use"
+    rotor_constant: 6.0e-6
+    rolling_moment_coefficient: 1.1e-6
+    max_rotor_velocity: 950          # [rad/s]
+    rotor_radius: 0.089              # [m] (3.5 inch props)
+    recommended_props: "3.5x3, 4x3"
+    typical_applications: ["General purpose", "Training", "Development"]
+
+  # Generic Large Motor - High thrust applications
+  Generic_Large:
+    description: "Generic large motor for heavy payloads"
+    rotor_constant: 9.2e-6
+    rolling_moment_coefficient: 2.1e-6
+    max_rotor_velocity: 700          # [rad/s]
+    rotor_radius: 0.152              # [m] (6 inch props)
+    recommended_props: "6x3, 6x4"
+    typical_applications: ["Heavy lift", "Long endurance", "Professional"]
+
+# Motor Selection Guidelines:
+#
+# Small Motors (2-3 inch props):
+#   - High agility, low endurance
+#   - Good for indoor flight and racing
+#   - Lower payload capacity
+#
+# Medium Motors (3.5-4 inch props):
+#   - Balanced performance
+#   - Good general purpose choice
+#   - Moderate payload and endurance
+#
+# Large Motors (5-6 inch props):
+#   - High efficiency, longer flight time
+#   - Better for heavy payloads
+#   - Lower agility, more stable
+
+# Notes on Parameters:
+# - rotor_constant: Higher values = more thrust per RPM
+# - rolling_moment_coefficient: Torque generation for yaw control
+# - max_rotor_velocity: Physical limit of motor/ESC combination
+# - rotor_radius: Affects moment arm for control authority
