@@ -4,7 +4,9 @@
 | Description: Base interface used to implement forces that should actuate on a rigidbody such as linear drag
 | License: BSD-3-Clause. Copyright (c) 2023, Marcelo Jacinto. All rights reserved.
 """
-from pegasus.simulator.logic.state import State
+
+from pegasus.simulator.logic.vehicle_state import VehicleState
+
 
 class Drag:
     """
@@ -26,7 +28,7 @@ class Drag:
         """
         return [0.0, 0.0, 0.0]
 
-    def update(self, state: State, dt: float):
+    def update(self, state: VehicleState, dt: float):
         """Method that should be implemented to update the drag force to be applied on the body frame of the vehicle
 
         Args:

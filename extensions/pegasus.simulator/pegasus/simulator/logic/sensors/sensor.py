@@ -5,13 +5,13 @@
 """
 __all__ = ["Sensor"]
 
-from pegasus.simulator.logic.state import State
+from pegasus.simulator.logic.vehicle_state import VehicleState
 
 class Sensor:
     """The base class for implementing a sensor
 
     Attributes:
-        update_period (float): The period for each sensor update: update_period = 1 / update_rate (in s).
+        update_interval_s (float): The time interval between sensor updates in seconds
         origin_lat (float): The latitude of the origin of the world in degrees (might get used by some sensors).
         origin_lon (float): The longitude of the origin of the world in degrees (might get used by some sensors).
         origin_alt (float): The altitude of the origin of the world relative to sea water level (might get used by some sensors)
@@ -27,11 +27,11 @@ class Sensor:
         # Set the sensor type and update rate
         self._sensor_type = sensor_type
         self._update_rate = update_rate
-        self._update_period = 1.0 / self._update_rate
+        self._update_interval_s = 1.0 / self._update_rate
 
-        # Auxiliar variables used to control whether to update the sensor or not given the time elapsed
-        self._first_update = True
-        self._total_time = 0.0
+        # Timing control
+        self._prev_update_time_s = 0.0
+        self._has_new_data = False
 
         # Set the "configuration of the world" - some sensors might need it
         self._origin_lat = -999
@@ -42,11 +42,11 @@ class Sensor:
 
     def initialize(self, vehicle, origin_lat, origin_lon, origin_alt):
         """Method that initializes the sensor latitude, longitude and altitude attributes.
-        
+
         Note:
             Given that some sensors require the knowledge of the latitude, longitude and altitude of the [0, 0, 0] coordinate
             of the world, then we might as well just save this information for whatever sensor that comes
-        
+
         Args:
             vehicle (Vehicle): A reference to the vehicle that this sensor is associated with
             origin_lat (float): The latitude of the origin of the world in degrees (might get used by some sensors).
@@ -65,46 +65,30 @@ class Sensor:
             update_rate (float): The new rate at which the data in the sensor should be refreshed (in Hz)
         """
         self._update_rate = update_rate
-        self._update_period = 1.0 / self._update_rate
+        self._update_interval_s = 1.0 / self._update_rate
 
-    def update_at_rate(fnc):
-        """Decorator function used to check if the time elapsed between the last sensor update call and the current 
-        sensor update call is higher than the defined update_rate of the sensor. If so, we need to actually compute new
-        values to simulate a measurement of the sensor at a given rate.
+    def should_update(self, current_time_s: float) -> bool:
+        """Check if enough time has passed for a sensor update
 
         Args:
-            fnc (function): The function that we want to enforce a specific update rate.
-
-        Examples:
-            >>> class GPS(Sensor):
-            >>>    @Sensor.update_at_rate
-            >>>    def update(self):
-            >>>        (do some logic here)
+            current_time_s (float): Current simulation time in seconds
 
         Returns:
-            [None, Dict]: This decorator function returns None if there was no data to be produced by the sensor at the
-            specified timestamp or a dict with the current state of the sensor otherwise.
+            bool: True if sensor should update, False otherwise
         """
+        return (current_time_s - self._prev_update_time_s) >= self._update_interval_s
 
-        # Define a wrapper function so that the "self" of the object can be passed to the function as well
-        def wrapper(self, state: State, dt: float):
+    def has_new_data(self) -> bool:
+        """Check if sensor has new data available
 
-            # Add the total time passed between the last time the sensor was updated and the current call
-            self._total_time += dt
+        Returns:
+            bool: True if new data is available since last read
+        """
+        return self._has_new_data
 
-            # If it is time to update the sensor data, then just call the update function of the sensor
-            if self._total_time >= self._update_period or self._first_update:
-
-                # Result of the update function for the sensor
-                result = fnc(self, state, self._total_time)
-
-                # Reset the auxiliar counter variables
-                self._first_update = False
-                self._total_time = 0.0
-
-                return result
-            return None
-        return wrapper
+    def clear_new_data_flag(self):
+        """Clear the new data flag after reading"""
+        self._has_new_data = False
 
     @property
     def sensor_type(self):
@@ -123,20 +107,20 @@ class Sensor:
     @property
     def state(self):
         """
-        (dict) A dictionary which contains the data produced by the sensor at any given time.
+        (object) The sensor state object that contains the data produced by the sensor.
         """
         return None
 
-    def update(self, state: State, dt: float):
+    def update(self, state: VehicleState, current_time_s: float):
         """Method that should be implemented by the class that inherits Sensor. This is where the actual implementation
         of the sensor should be performed.
 
         Args:
-            state (State): The current state of the vehicle.
-            dt (float): The time elapsed between the previous and current function calls (s).
+            state (VehicleState): The current state of the vehicle.
+            current_time_s (float): Current simulation time in seconds
 
         Returns:
-            (dict) A dictionary containing the current state of the sensor (the data produced by the sensor)
+            (object) The sensor state object if updated, None if not time to update yet
         """
         pass
 
@@ -156,7 +140,7 @@ class Sensor:
         pass
 
     def config_from_dict(self, config_dict):
-        """Method that should be implemented by the class that inherits Sensor. This is where the configuration of the 
+        """Method that should be implemented by the class that inherits Sensor. This is where the configuration of the
         sensor based on a dictionary input should be performed.
 
         Args:

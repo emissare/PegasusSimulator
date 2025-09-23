@@ -8,7 +8,8 @@ to a gazebo-based simulation.
 import numpy as np
 
 # Declare which functions are visible from this file
-__all__ = ["get_mag_declination", "get_mag_inclination", "get_mag_strength", "reprojection", "GRAVITY_VECTOR"]
+__all__ = ["get_mag_declination", "get_mag_inclination", "get_mag_strength", "convert_ned_to_geodetic", "GRAVITY_VECTOR",
+           "reprojection"]  # Keep reprojection for backward compatibility (deprecated)
 
 # --------------------------------------------------------------------
 # Magnetic field data from WMM2018 (10^5xnanoTesla (N, E D) n-frame )
@@ -70,8 +71,8 @@ SAMPLING_MAX_LON = 180  # deg
 
 EARTH_RADIUS = 6353000.0  # meters
 
-# Gravity vector expressed in ENU
-GRAVITY_VECTOR = np.array([0.0, 0.0, -9.80665])  # m/s^2
+# Gravity vector expressed in NED (North, East, Down)
+GRAVITY_VECTOR = np.array([0.0, 0.0, 9.80665])  # m/s^2 (positive down in NED)
 
 
 def get_lookup_table_index(val: int, min: int, max: int):
@@ -127,23 +128,51 @@ def get_mag_strength(latitude: float, longitude: float):
     return get_table_data(latitude, longitude, STRENGTH_TABLE)
 
 
-def reprojection(position: np.ndarray, origin_lat=-999, origin_long=-999):
+def convert_ned_to_geodetic(position_ned_m: np.ndarray, origin_latitude_rad: float, origin_longitude_rad: float):
     """
-    Compute the latitude and longitude coordinates from a local position
+    Convert a position from local NED coordinates to geodetic (latitude/longitude) coordinates.
+
+    Args:
+        position_ned_m: Position in NED frame [North, East, Down] in meters
+        origin_latitude_rad: Origin latitude in radians
+        origin_longitude_rad: Origin longitude in radians
+
+    Returns:
+        tuple: (latitude_rad, longitude_rad) - Both in radians
     """
 
-    # reproject local position to gps coordinates
-    x_rad: float = position[1] / EARTH_RADIUS  # north
-    y_rad: float = position[0] / EARTH_RADIUS  # east
-    c: float = np.sqrt(x_rad * x_rad + y_rad * y_rad)
-    sin_c: float = np.sin(c)
-    cos_c: float = np.cos(c)
+    # Convert NED position to angular displacement from origin
+    north_angular_rad: float = position_ned_m[0] / EARTH_RADIUS  # North displacement in radians
+    east_angular_rad: float = position_ned_m[1] / EARTH_RADIUS   # East displacement in radians
+    # Calculate angular distance from origin
+    angular_distance: float = np.sqrt(north_angular_rad * north_angular_rad + east_angular_rad * east_angular_rad)
+    sin_angular_distance: float = np.sin(angular_distance)
+    cos_angular_distance: float = np.cos(angular_distance)
 
-    if c != 0.0:
-        latitude_rad = np.arcsin(cos_c * np.sin(origin_lat) + (x_rad * sin_c * np.cos(origin_lat)) / c)
-        longitude_rad = origin_long + np.arctan2(y_rad * sin_c, c * np.cos(origin_lat) * cos_c - x_rad * np.sin(origin_lat) * sin_c)
+    if angular_distance != 0.0:
+        # Calculate new latitude using spherical trigonometry
+        latitude_rad = np.arcsin(
+            cos_angular_distance * np.sin(origin_latitude_rad) +
+            (north_angular_rad * sin_angular_distance * np.cos(origin_latitude_rad)) / angular_distance
+        )
+
+        # Calculate new longitude
+        longitude_rad = origin_longitude_rad + np.arctan2(
+            east_angular_rad * sin_angular_distance,
+            angular_distance * np.cos(origin_latitude_rad) * cos_angular_distance -
+            north_angular_rad * np.sin(origin_latitude_rad) * sin_angular_distance
+        )
     else:
-        latitude_rad = origin_lat
-        longitude_rad = origin_long
+        # No displacement from origin
+        latitude_rad = origin_latitude_rad
+        longitude_rad = origin_longitude_rad
 
     return latitude_rad, longitude_rad
+
+
+def reprojection(position: np.ndarray, origin_lat=-999, origin_long=-999):
+    """
+    DEPRECATED: Use convert_ned_to_geodetic() instead.
+    Legacy wrapper for backward compatibility.
+    """
+    return convert_ned_to_geodetic(position, origin_lat, origin_long)

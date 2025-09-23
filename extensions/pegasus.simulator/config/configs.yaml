@@ -1,6 +1,6 @@
 global_coordinates:
   altitude: 90.0
-  latitude: 32
-  longitude: -117
+  latitude: 32.77463
+  longitude: -117.07953
 px4_default_airframe: gazebo-classic_iris # Change to 'iris' if using PX4 version lower than v1.14
 px4_dir: /workspace/PX4-Autopilot

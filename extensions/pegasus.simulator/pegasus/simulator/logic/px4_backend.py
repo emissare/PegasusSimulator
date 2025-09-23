@@ -12,7 +12,15 @@ import time
 import numpy as np
 from pymavlink import mavutil
 
-from pegasus.simulator.logic.state import State
+from typing import Optional
+from pegasus.simulator.logic.vehicle_state import VehicleState
+from pegasus.simulator.logic.sensors.sensor_models import (
+    GPSState,
+    IMUState,
+    BarometerState,
+    MagnetometerState,
+    SimulationState,
+)
 
 # Removed backend abstraction - no longer needed
 from pegasus.simulator.logic.interface.pegasus_interface import PegasusInterface
@@ -39,67 +47,33 @@ class SensorSource:
 
 class SensorMsg:
     """
-    An auxiliary data class where we write all the sensor data that is going to be sent through mavlink
+    An auxiliary data class where we store all the sensor data that is going to be sent through mavlink.
+    Uses Pydantic BaseModels for type safety and clear documentation of units and coordinate systems.
     """
 
     def __init__(self):
+        # Sensor states using BaseModels
+        self.imu_state: Optional[IMUState] = None
+        self.gps_state: Optional[GPSState] = None
+        self.barometer_state: Optional[BarometerState] = None
+        self.magnetometer_state: Optional[MagnetometerState] = None
 
-        # IMU Data
+        # Simulation groundtruth state
+        self.simulation_state: Optional[SimulationState] = None
+
+        # Flags indicating new data is available
         self.new_imu_data: bool = False
-        self.received_first_imu: bool = False
-        self.xacc: float = 0.0
-        self.yacc: float = 0.0
-        self.zacc: float = 0.0
-        self.xgyro: float = 0.0
-        self.ygyro: float = 0.0
-        self.zgyro: float = 0.0
-
-        # Baro Data
+        self.new_gps_data: bool = False
         self.new_bar_data: bool = False
-        self.abs_pressure: float = 0.0
-        self.pressure_alt: float = 0.0
-        self.temperature: float = 0.0
-
-        # Magnetometer Data
         self.new_mag_data: bool = False
-        self.xmag: float = 0.0
-        self.ymag: float = 0.0
-        self.zmag: float = 0.0
+        self.new_sim_state: bool = False
 
-        # Airspeed Data
+        # Special flags for IMU
+        self.received_first_imu: bool = False
+
+        # Airspeed data (not yet in a model)
         self.new_press_data: bool = False
         self.diff_pressure: float = 0.0
-
-        # GPS Data
-        self.new_gps_data: bool = False
-        self.fix_type: int = 0
-        self.latitude_deg: float = -999
-        self.longitude_deg: float = -999
-        self.altitude: float = -999
-        self.eph: float = 1.0
-        self.epv: float = 1.0
-        self.velocity: float = 0.0
-        self.velocity_north: float = 0.0
-        self.velocity_east: float = 0.0
-        self.velocity_down: float = 0.0
-        self.cog: float = 0.0
-        self.satellites_visible: int = 0
-
-        # Simulation State
-        self.new_sim_state: bool = False
-        self.sim_attitude = [1.0, 0.0, 0.0, 0.0]  # [w, x, y, z]
-        self.sim_acceleration = [0.0, 0.0, 0.0]  # [x,y,z body acceleration]
-        self.sim_angular_vel = [
-            0.0,
-            0.0,
-            0.0,
-        ]  # [roll-rate, pitch-rate, yaw-rate] rad/s
-        self.sim_lat = 0.0  # [deg]
-        self.sim_lon = 0.0  # [deg]
-        self.sim_alt = 0.0  # [m]
-        self.sim_ind_airspeed = 0.0  # Indicated air speed
-        self.sim_true_airspeed = 0.0  # Indicated air speed
-        self.sim_velocity_inertial = [0.0, 0.0, 0.0]  # North-east-down [m/s]
 
 
 class ThrusterControl:
@@ -356,113 +330,93 @@ class PX4Backend:
         else:
             pass
 
-    def update_imu_data(self, data):
+    def update_imu_data(self, data: IMUState):
         """Gets called by the 'update_sensor' method to update the current IMU data
 
         Args:
-            data (dict): The data produced by an IMU sensor
+            data (IMUState): The data produced by an IMU sensor
         """
-
-        # Acelerometer data
-        self._sensor_data.xacc = data["linear_acceleration"][0]
-        self._sensor_data.yacc = data["linear_acceleration"][1]
-        self._sensor_data.zacc = data["linear_acceleration"][2]
-
-        # Gyro data
-        self._sensor_data.xgyro = data["angular_velocity"][0]
-        self._sensor_data.ygyro = data["angular_velocity"][1]
-        self._sensor_data.zgyro = data["angular_velocity"][2]
-
-        # Signal that we have new IMU data
+        self._sensor_data.imu_state = data
         self._sensor_data.new_imu_data = True
         self._sensor_data.received_first_imu = True
 
-    def update_gps_data(self, data):
+    def update_gps_data(self, data: GPSState):
         """Gets called by the 'update_sensor' method to update the current GPS data
 
         Args:
-            data (dict): The data produced by an GPS sensor
+            data (GPSState): The data produced by a GPS sensor
         """
-
-        # GPS data
-        self._sensor_data.fix_type = int(data["fix_type"])
-        self._sensor_data.latitude_deg = int(data["latitude"] * 10000000)
-        self._sensor_data.longitude_deg = int(data["longitude"] * 10000000)
-        self._sensor_data.altitude = int(data["altitude"] * 1000)
-        self._sensor_data.eph = int(data["eph"])
-        self._sensor_data.epv = int(data["epv"])
-        self._sensor_data.velocity = int(data["speed"] * 100)
-        self._sensor_data.velocity_north = int(data["velocity_north"] * 100)
-        self._sensor_data.velocity_east = int(data["velocity_east"] * 100)
-        self._sensor_data.velocity_down = int(data["velocity_down"] * 100)
-        self._sensor_data.cog = int(data["cog"] * 100)
-        self._sensor_data.satellites_visible = int(data["sattelites_visible"])
-
-        # Signal that we have new GPS data
+        self._sensor_data.gps_state = data
         self._sensor_data.new_gps_data = True
 
-        # Also update the groundtruth for the latitude and longitude
-        self._sensor_data.sim_lat = int(data["latitude_gt"] * 10000000)
-        self._sensor_data.sim_lon = int(data["longitude_gt"] * 10000000)
-        self._sensor_data.sim_alt = int(data["altitude_gt"] * 1000)
+    def update_bar_data(self, data: BarometerState):
+        """Gets called by the 'update_sensor' method to update the current barometer data
 
-    def update_bar_data(self, data):
-        self._sensor_data.temperature = data["temperature"]
-        self._sensor_data.abs_pressure = data["absolute_pressure"]
-        self._sensor_data.pressure_alt = data["pressure_altitude"]
-
+        Args:
+            data (BarometerState): The data produced by a barometer sensor
+        """
+        self._sensor_data.barometer_state = data
         self._sensor_data.new_bar_data = True
 
-    def update_mag_data(self, data):
-        self._sensor_data.xmag = data["magnetic_field"][0]
-        self._sensor_data.ymag = data["magnetic_field"][1]
-        self._sensor_data.zmag = data["magnetic_field"][2]
+    def update_mag_data(self, data: MagnetometerState):
+        """Gets called by the 'update_sensor' method to update the current magnetometer data
 
+        Args:
+            data (MagnetometerState): The data produced by a magnetometer sensor
+        """
+        self._sensor_data.magnetometer_state = data
         self._sensor_data.new_mag_data = True
 
-    def update_state(self, state: State):
+    def update_state(self, state: VehicleState):
         """Method that is used as callback and gets called at every physics step with the current state of the vehicle.
         This state is then stored in order to be sent as groundtruth via mavlink
 
         Args:
-            state (State): The current state of the vehicle.
+            state (VehicleState): The current state of the vehicle.
         """
 
         # Get the quaternion in the convention [x, y, z, w]
-        attitude = state.get_attitude_ned_frd()
+        attitude_quat = state.attitude_frd_ned_quat
 
-        # Rotate the quaternion to the mavlink standard
-        self._sensor_data.sim_attitude[0] = attitude[3]
-        self._sensor_data.sim_attitude[1] = attitude[0]
-        self._sensor_data.sim_attitude[2] = attitude[1]
-        self._sensor_data.sim_attitude[3] = attitude[2]
+        # Convert to mavlink format [qw, qx, qy, qz]
+        attitude_wxyz = [
+            attitude_quat[3],  # qw
+            attitude_quat[0],  # qx
+            attitude_quat[1],  # qy
+            attitude_quat[2],  # qz
+        ]
 
-        # Get the angular velocity
-        ang_vel = state.get_angular_velocity_frd()
-        self._sensor_data.sim_angular_vel[0] = ang_vel[0]
-        self._sensor_data.sim_angular_vel[1] = ang_vel[1]
-        self._sensor_data.sim_angular_vel[2] = ang_vel[2]
+        angular_vel_frd = state.angular_velocity_frd_rps
+        acceleration_ned = state.acceleration_ned_mpss
+        velocity_ned = state.velocity_ned_mps
+        body_velocity_frd = state.body_velocity_frd_mps
 
-        # Get the acceleration
-        acc_vel = state.get_linear_acceleration_ned()
-        self._sensor_data.sim_acceleration[0] = int(acc_vel[0] * 1000)
-        self._sensor_data.sim_acceleration[1] = int(acc_vel[1] * 1000)
-        self._sensor_data.sim_acceleration[2] = int(acc_vel[2] * 1000)
+        # Convert NED position to geodetic coordinates
+        import numpy as np
 
-        # Get the latitude, longitude and altitude directly from the GPS
+        # For now, use simple approximation if GPS hasn't been initialized
+        if self._sensor_data.gps_state:
+            latitude_deg = self._sensor_data.gps_state.latitude_groundtruth_deg
+            longitude_deg = self._sensor_data.gps_state.longitude_groundtruth_deg
+            altitude_msl_m = self._sensor_data.gps_state.altitude_groundtruth_msl_m
+        else:
+            # Default origin coordinates
+            latitude_deg = 0.0
+            longitude_deg = 0.0
+            altitude_msl_m = 488.0
 
-        # Get the linear velocity of the vehicle in the inertial frame
-        lin_vel = state.get_linear_velocity_ned()
-        self._sensor_data.sim_velocity_inertial[0] = int(lin_vel[0] * 100)
-        self._sensor_data.sim_velocity_inertial[1] = int(lin_vel[1] * 100)
-        self._sensor_data.sim_velocity_inertial[2] = int(lin_vel[2] * 100)
-
-        # Compute the air_speed - assumed indicated airspeed due to flow aligned with pitot (body x)
-        body_vel = state.get_linear_body_velocity_ned_frd()
-        self._sensor_data.sim_ind_airspeed = int(body_vel[0] * 100)
-        self._sensor_data.sim_true_airspeed = int(
-            np.linalg.norm(lin_vel) * 100
-        )  # TODO - add wind here
+        # Create SimulationState object
+        self._sensor_data.simulation_state = SimulationState(
+            attitude_quat_wxyz_frd_ned=attitude_wxyz,
+            angular_velocity_frd_body_rps=angular_vel_frd.tolist(),
+            acceleration_ned_mpss=acceleration_ned.tolist(),
+            velocity_ned_mps=velocity_ned.tolist(),
+            latitude_deg=latitude_deg,
+            longitude_deg=longitude_deg,
+            altitude_msl_m=altitude_msl_m,
+            indicated_airspeed_mps=body_velocity_frd[0],  # Assumed aligned with body X
+            true_airspeed_mps=np.linalg.norm(velocity_ned),  # TODO: add wind
+        )
 
         self._sensor_data.new_sim_state = True
 
@@ -506,8 +460,8 @@ class PX4Backend:
 
             # Get GPS coordinates from PegasusInterface
             pegasus_interface = PegasusInterface()
-            latitude = pegasus_interface.latitude
-            longitude = pegasus_interface.longitude
+            latitude = pegasus_interface.latitude_deg
+            longitude = pegasus_interface.longitude_deg
 
             self.px4_tool = PX4LaunchTool(
                 self.px4_dir,
@@ -759,22 +713,54 @@ class PX4Backend:
             fields_updated = fields_updated | SensorSource.DIFF_PRESS
             self._sensor_data.new_press_data = False
 
+        # Prepare sensor values with defaults if states are None
+        xacc = yacc = zacc = 0.0
+        xgyro = ygyro = zgyro = 0.0
+        xmag = ymag = zmag = 0.0
+        abs_pressure = pressure_alt = 0.0
+        temperature = 0.0
+
+        if self._sensor_data.imu_state:
+            xacc = self._sensor_data.imu_state.linear_acceleration_frd_body_mpss[0]
+            yacc = self._sensor_data.imu_state.linear_acceleration_frd_body_mpss[1]
+            zacc = self._sensor_data.imu_state.linear_acceleration_frd_body_mpss[2]
+            xgyro = self._sensor_data.imu_state.angular_velocity_frd_body_rps[0]
+            ygyro = self._sensor_data.imu_state.angular_velocity_frd_body_rps[1]
+            zgyro = self._sensor_data.imu_state.angular_velocity_frd_body_rps[2]
+
+        if self._sensor_data.magnetometer_state:
+            xmag = self._sensor_data.magnetometer_state.magnetic_field_frd_body_gauss[0]
+            ymag = self._sensor_data.magnetometer_state.magnetic_field_frd_body_gauss[1]
+            zmag = self._sensor_data.magnetometer_state.magnetic_field_frd_body_gauss[2]
+
+        if self._sensor_data.barometer_state:
+            abs_pressure = (
+                self._sensor_data.barometer_state.pressure_pa * 0.01
+            )  # Convert Pa to hPa
+            pressure_alt = self._sensor_data.barometer_state.altitude_msl_m
+            temperature = self._sensor_data.barometer_state.temperature_celsius
+
+        # Get altitude from GPS if available
+        altitude = 0.0
+        if self._sensor_data.gps_state:
+            altitude = self._sensor_data.gps_state.altitude_msl_m
+
         try:
             self._connection.mav.hil_sensor_send(
                 time_usec,
-                self._sensor_data.xacc,
-                self._sensor_data.yacc,
-                self._sensor_data.zacc,
-                self._sensor_data.xgyro,
-                self._sensor_data.ygyro,
-                self._sensor_data.zgyro,
-                self._sensor_data.xmag,
-                self._sensor_data.ymag,
-                self._sensor_data.zmag,
-                self._sensor_data.abs_pressure,
-                self._sensor_data.diff_pressure,
-                self._sensor_data.pressure_alt,
-                self._sensor_data.altitude,
+                xacc,
+                yacc,
+                zacc,
+                xgyro,
+                ygyro,
+                zgyro,
+                xmag,
+                ymag,
+                zmag,
+                abs_pressure,
+                self._sensor_data.diff_pressure,  # Still using old format for airspeed
+                pressure_alt,
+                altitude,
                 fields_updated,
             )
         except:
@@ -790,27 +776,39 @@ class PX4Backend:
         # carb.log_info("Sending GPS msgs")
 
         # Do not send GPS data, if no new data was received
-        if not self._sensor_data.new_gps_data:
+        if not self._sensor_data.new_gps_data or not self._sensor_data.gps_state:
             return
 
         self._sensor_data.new_gps_data = False
 
-        # Latitude, longitude and altitude (all in integers)
+        gps: GPSState = self._sensor_data.gps_state
+
+        # Convert to mavlink integer format
+        latitude_deg_e7 = int(gps.latitude_deg * 10000000)
+        longitude_deg_e7 = int(gps.longitude_deg * 10000000)
+        altitude_mm = int(gps.altitude_msl_m * 1000)
+        eph = int(gps.horizontal_position_error_m * 100)  # Convert m to cm
+        epv = int(gps.vertical_position_error_m * 100)  # Convert m to cm
+        velocity = int(gps.ground_speed_mps * 100)  # Convert m/s to cm/s
+        velocity_north = int(gps.velocity_north_mps * 100)  # Convert m/s to cm/s
+        velocity_east = int(gps.velocity_east_mps * 100)  # Convert m/s to cm/s
+        velocity_down = int(gps.velocity_down_mps * 100)  # Convert m/s to cm/s
+
         try:
             self._connection.mav.hil_gps_send(
                 time_usec,
-                self._sensor_data.fix_type,
-                self._sensor_data.latitude_deg,
-                self._sensor_data.longitude_deg,
-                self._sensor_data.altitude,
-                self._sensor_data.eph,
-                self._sensor_data.epv,
-                self._sensor_data.velocity,
-                self._sensor_data.velocity_north,
-                self._sensor_data.velocity_east,
-                self._sensor_data.velocity_down,
-                self._sensor_data.cog,
-                self._sensor_data.satellites_visible,
+                gps.fix_type,
+                latitude_deg_e7,
+                longitude_deg_e7,
+                altitude_mm,
+                eph,
+                epv,
+                velocity,
+                velocity_north,
+                velocity_east,
+                velocity_down,
+                gps.course_over_ground_cdeg,  # Already in centidegrees
+                gps.satellites_visible,
             )
         except:
             carb.log_warn("Could not send gps data through mavlink")
@@ -825,30 +823,51 @@ class PX4Backend:
 
         carb.log_info("Sending groundtruth msgs")
 
-        # Do not send vision/mocap data, if not new data was received
-        if not self._sensor_data.new_sim_state or self._sensor_data.sim_alt == 0:
+        # Do not send if no new data or no simulation state
+        if (
+            not self._sensor_data.new_sim_state
+            or not self._sensor_data.simulation_state
+        ):
             return
 
+        if self._sensor_data.simulation_state.altitude_msl_m == 0:
+            return  # Don't send if altitude is exactly zero
+
         self._sensor_data.new_sim_state = False
+
+        sim = self._sensor_data.simulation_state
+
+        # Convert to mavlink integer format
+        latitude_deg_e7 = int(sim.latitude_deg * 10000000)
+        longitude_deg_e7 = int(sim.longitude_deg * 10000000)
+        altitude_mm = int(sim.altitude_msl_m * 1000)
+        velocity_n_cm = int(sim.velocity_ned_mps[0] * 100)
+        velocity_e_cm = int(sim.velocity_ned_mps[1] * 100)
+        velocity_d_cm = int(sim.velocity_ned_mps[2] * 100)
+        ind_airspeed_cm = int(sim.indicated_airspeed_mps * 100)
+        true_airspeed_cm = int(sim.true_airspeed_mps * 100)
+        xacc_mg = int(sim.acceleration_ned_mpss[0] * 1000)
+        yacc_mg = int(sim.acceleration_ned_mpss[1] * 1000)
+        zacc_mg = int(sim.acceleration_ned_mpss[2] * 1000)
 
         try:
             self._connection.mav.hil_state_quaternion_send(
                 time_usec,
-                self._sensor_data.sim_attitude,
-                self._sensor_data.sim_angular_vel[0],
-                self._sensor_data.sim_angular_vel[1],
-                self._sensor_data.sim_angular_vel[2],
-                self._sensor_data.sim_lat,
-                self._sensor_data.sim_lon,
-                self._sensor_data.sim_alt,
-                self._sensor_data.sim_velocity_inertial[0],
-                self._sensor_data.sim_velocity_inertial[1],
-                self._sensor_data.sim_velocity_inertial[2],
-                self._sensor_data.sim_ind_airspeed,
-                self._sensor_data.sim_true_airspeed,
-                self._sensor_data.sim_acceleration[0],
-                self._sensor_data.sim_acceleration[1],
-                self._sensor_data.sim_acceleration[2],
+                sim.attitude_quat_wxyz_frd_ned,  # Already in [qw, qx, qy, qz] format
+                sim.angular_velocity_frd_body_rps[0],
+                sim.angular_velocity_frd_body_rps[1],
+                sim.angular_velocity_frd_body_rps[2],
+                latitude_deg_e7,
+                longitude_deg_e7,
+                altitude_mm,
+                velocity_n_cm,
+                velocity_e_cm,
+                velocity_d_cm,
+                ind_airspeed_cm,
+                true_airspeed_cm,
+                xacc_mg,
+                yacc_mg,
+                zacc_mg,
             )
         except:
             carb.log_warn("Could not send groundtruth through mavlink")

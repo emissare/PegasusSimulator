@@ -4,6 +4,7 @@
 | License: BSD-3-Clause. Copyright (c) 2024. All rights reserved.
 | Description: Simulated laser rangefinder sensor using raycasting
 """
+
 __all__ = ["LaserRangefinder"]
 
 import time
@@ -16,7 +17,7 @@ from omni.usd import get_context
 from pxr import Gf
 
 # Pegasus imports
-from pegasus.simulator.logic.state import State
+from pegasus.simulator.logic.vehicle_state import VehicleState
 from pegasus.simulator.logic.graphical_sensors import GraphicalSensor
 
 
@@ -46,8 +47,7 @@ class LaserRangefinder(GraphicalSensor):
 
         # Initialize the GraphicalSensor base class
         super().__init__(
-            sensor_type="LaserRangefinder",
-            update_rate=config.get("frequency", 10.0)
+            sensor_type="LaserRangefinder", update_rate=config.get("frequency", 10.0)
         )
 
         # Sensor configuration
@@ -58,15 +58,11 @@ class LaserRangefinder(GraphicalSensor):
         self._min_range = config.get("min_range", 0.1)
         self._frequency = config.get("frequency", 10.0)
         self._beam_width = config.get("beam_width", 0.01)  # Beam divergence in radians
-        self._accuracy = config.get("accuracy", 0.02)      # Measurement noise in meters
+        self._accuracy = config.get("accuracy", 0.02)  # Measurement noise in meters
 
         # Sensor state
         self._stage_prim_path = ""
-        self._state = {
-            'distance': 0.0,
-            'timestamp': 0.0,
-            'valid': False
-        }
+        self._state = {"distance": 0.0, "timestamp": 0.0, "valid": False}
 
         # Physics interface for raycasting
         self._physx_interface = None
@@ -78,7 +74,7 @@ class LaserRangefinder(GraphicalSensor):
         """Compute local transform matrix from position and orientation."""
 
         # Create rotation matrix from Euler angles
-        rotation = Rotation.from_euler('xyz', self._orientation, degrees=True)
+        rotation = Rotation.from_euler("xyz", self._orientation, degrees=True)
         rotation_matrix = rotation.as_matrix()
 
         # Create 4x4 transform matrix
@@ -99,7 +95,9 @@ class LaserRangefinder(GraphicalSensor):
         # Get PhysX interface for raycasting
         self._physx_interface = get_physx_interface()
 
-        print(f"LaserRangefinder '{self._sensor_name}' initialized at {self._stage_prim_path}")
+        print(
+            f"LaserRangefinder '{self._sensor_name}' initialized at {self._stage_prim_path}"
+        )
 
     def start(self):
         """Start the rangefinder sensor."""
@@ -110,7 +108,7 @@ class LaserRangefinder(GraphicalSensor):
         print(f"LaserRangefinder '{self._sensor_name}' stopped")
 
     @GraphicalSensor.update_at_rate
-    def update(self, state: State, dt: float):
+    def update(self, state: VehicleState, dt: float):
         """
         Update the laser rangefinder measurement using raycasting.
 
@@ -127,10 +125,14 @@ class LaserRangefinder(GraphicalSensor):
         vehicle_quaternion = state.attitude_inertial_frame  # [qw, qx, qy, qz]
 
         # Convert vehicle quaternion to rotation matrix
-        vehicle_rot = Rotation.from_quat([
-            vehicle_quaternion[1], vehicle_quaternion[2],
-            vehicle_quaternion[3], vehicle_quaternion[0]
-        ])
+        vehicle_rot = Rotation.from_quat(
+            [
+                vehicle_quaternion[1],
+                vehicle_quaternion[2],
+                vehicle_quaternion[3],
+                vehicle_quaternion[0],
+            ]
+        )
         vehicle_rotation_matrix = vehicle_rot.as_matrix()
 
         # Compute sensor world transform
@@ -148,17 +150,19 @@ class LaserRangefinder(GraphicalSensor):
 
         # Update sensor state
         self._state = {
-            'distance': distance,
-            'timestamp': time.time(),
-            'valid': hit_valid,
-            'sensor_name': self._sensor_name,
-            'max_range': self._max_range,
-            'min_range': self._min_range
+            "distance": distance,
+            "timestamp": time.time(),
+            "valid": hit_valid,
+            "sensor_name": self._sensor_name,
+            "max_range": self._max_range,
+            "min_range": self._min_range,
         }
 
         return self._state
 
-    def _compute_sensor_world_transform(self, vehicle_position, vehicle_rotation_matrix):
+    def _compute_sensor_world_transform(
+        self, vehicle_position, vehicle_rotation_matrix
+    ):
         """
         Compute the sensor's world transform from vehicle state and local transform.
         """
@@ -206,7 +210,8 @@ class LaserRangefinder(GraphicalSensor):
                 if hit_info.get("hit", False):
                     hit_position = hit_info.get("position", ray_end_carb)
                     hit_distance = np.linalg.norm(
-                        np.array([hit_position[0], hit_position[1], hit_position[2]]) - sensor_position
+                        np.array([hit_position[0], hit_position[1], hit_position[2]])
+                        - sensor_position
                     )
 
                     # Check if hit is within valid range
@@ -236,7 +241,7 @@ class LaserRangefinder(GraphicalSensor):
         Returns:
             float: Distance in meters, or max_range if no valid measurement
         """
-        return self._state.get('distance', self._max_range)
+        return self._state.get("distance", self._max_range)
 
     def is_valid(self):
         """
@@ -245,7 +250,7 @@ class LaserRangefinder(GraphicalSensor):
         Returns:
             bool: True if measurement is valid, False otherwise
         """
-        return self._state.get('valid', False)
+        return self._state.get("valid", False)
 
     @property
     def state(self):

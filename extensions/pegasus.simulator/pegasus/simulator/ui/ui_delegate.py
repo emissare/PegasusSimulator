@@ -50,11 +50,11 @@ class UIDelegate:
 
         # Selected latitude, longitude and altitude
         self._latitude_field: ui.AbstractValueModel = None
-        self._latitude = PegasusInterface().latitude
+        self._latitude = PegasusInterface().latitude_deg
         self._longitude_field: ui.AbstractValueModel = None
-        self._longitude = PegasusInterface().longitude
+        self._longitude = PegasusInterface().longitude_deg
         self._altitude_field: ui.AbstractValueModel = None
-        self._altitude = PegasusInterface().altitude
+        self._altitude = PegasusInterface().altitude_msl_m
 
         # Attribute that hold the currently selected vehicle from the dropdown menu
         self._vehicle_dropdown: ui.AbstractItemModel = None
@@ -148,9 +148,9 @@ class UIDelegate:
         """
         self._pegasus_sim.set_default_global_coordinates()
 
-        self._latitude_field.set_value(self._pegasus_sim.latitude)
-        self._longitude_field.set_value(self._pegasus_sim.longitude)
-        self._altitude_field.set_value(self._pegasus_sim.altitude)
+        self._latitude_field.set_value(self._pegasus_sim.latitude_deg)
+        self._longitude_field.set_value(self._pegasus_sim.longitude_deg)
+        self._altitude_field.set_value(self._pegasus_sim.altitude_msl_m)
 
     def on_set_new_default_global_coordinates(self):
         """

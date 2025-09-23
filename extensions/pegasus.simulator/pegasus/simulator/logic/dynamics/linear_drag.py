@@ -4,9 +4,11 @@
 | Description: Computes the forces that should actuate on a rigidbody affected by linear drag
 | License: BSD-3-Clause. Copyright (c) 2023, Marcelo Jacinto. All rights reserved.
 """
+
 import numpy as np
 from pegasus.simulator.logic.dynamics.drag import Drag
-from pegasus.simulator.logic.state import State
+from pegasus.simulator.logic.vehicle_state import VehicleState
+
 
 class LinearDrag(Drag):
     """
@@ -42,22 +44,22 @@ class LinearDrag(Drag):
         """
         return self._drag_force
 
-    def update(self, state: State, dt: float):
+    def update(self, state: VehicleState, dt: float):
         """Method that updates the drag force to be applied on the body frame of the vehicle. The total drag force
-        applied on the body reference frame (FLU convention) is given by diag(dx,dy,dz) * R' * v
-        where v is the velocity of the vehicle expressed in the inertial frame and R' * v = velocity_body_frame
+        is computed as: F_drag = -diag(dx,dy,dz) * velocity_body_frame
 
         Args:
-            state (State): The current state of the vehicle.
-             dt (float): The time elapsed between the previous and current function calls (s).
+            state (VehicleState): The current state of the vehicle.
+            dt (float): The time elapsed between the previous and current function calls (s).
 
         Returns:
-            list: A list with len==3 containing the drag force to be applied on the rigid body according to a FLU body reference
+            np.ndarray: A 3-element array containing the drag force in FRD body frame [N]
         """
 
-        # Get the velocity of the vehicle expressed in the body frame of reference
-        body_vel = state.linear_body_velocity
+        # Get body velocity in FRD frame (standard frame)
+        body_vel_frd = state.body_velocity_frd_mps
 
-        # Compute the component of the drag force to be applied in the body frame
-        self._drag_force = -np.dot(self._drag_coefficients, body_vel)
-        return self._drag_force
+        # Compute drag force in FRD body frame
+        # Note: drag coefficients should be defined in FRD frame
+        self._drag_force_frd = -np.dot(self._drag_coefficients, body_vel_frd)
+        return self._drag_force_frd

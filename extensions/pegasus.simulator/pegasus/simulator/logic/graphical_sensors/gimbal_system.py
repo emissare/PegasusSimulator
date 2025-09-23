@@ -4,6 +4,7 @@
 | License: BSD-3-Clause. Copyright (c) 2024. All rights reserved.
 | Description: Multi-sensor gimbal system with 3-axis articulation
 """
+
 __all__ = ["GimbalSystem"]
 
 import yaml
@@ -17,7 +18,7 @@ from pxr import UsdGeom, UsdPhysics, Gf, Usd
 from omni.usd import get_context
 
 # Pegasus imports
-from pegasus.simulator.logic.state import State
+from pegasus.simulator.logic.vehicle_state import VehicleState
 from pegasus.simulator.logic.graphical_sensors import GraphicalSensor
 from pegasus.simulator.logic.graphical_sensors.monocular_camera import MonocularCamera
 from pegasus.simulator.logic.graphical_sensors.laser_rangefinder import LaserRangefinder
@@ -43,28 +44,33 @@ class GimbalSystem(GraphicalSensor):
         """
 
         # Load gimbal configuration using path utilities
-        from pegasus.simulator.utils.paths import resolve_config_path, ensure_config_file_exists
+        from pegasus.simulator.utils.paths import (
+            resolve_config_path,
+            ensure_config_file_exists,
+        )
 
         config_path = resolve_config_path(gimbal_config_file)
         config_path = ensure_config_file_exists(config_path, "gimbal config")
 
-        with open(config_path, 'r') as f:
+        with open(config_path, "r") as f:
             self.config = yaml.safe_load(f)
 
         # Initialize the GraphicalSensor base class
         super().__init__(
             sensor_type="GimbalSystem",
-            update_rate=self.config['gimbal'].get('control', {}).get('status_rate', 10.0)
+            update_rate=self.config["gimbal"]
+            .get("control", {})
+            .get("status_rate", 10.0),
         )
 
         self.mount_point = mount_point
-        self.gimbal_config = self.config['gimbal']
+        self.gimbal_config = self.config["gimbal"]
 
         # Gimbal state
         self._gimbal_angles = {
-            'yaw': 0.0,
-            'pitch': self.gimbal_config['joints']['pitch']['default_position'],
-            'roll': 0.0
+            "yaw": 0.0,
+            "pitch": self.gimbal_config["joints"]["pitch"]["default_position"],
+            "roll": 0.0,
         }
 
         # Joint drives for control
@@ -77,14 +83,20 @@ class GimbalSystem(GraphicalSensor):
         self._gimbal_prims = {}
 
         # Control state
-        self._control_mode = self.gimbal_config.get('control', {}).get('mode', 'position')
-        self._stabilization_enabled = self.gimbal_config.get('control', {}).get('stabilization', {}).get('enabled', True)
+        self._control_mode = self.gimbal_config.get("control", {}).get(
+            "mode", "position"
+        )
+        self._stabilization_enabled = (
+            self.gimbal_config.get("control", {})
+            .get("stabilization", {})
+            .get("enabled", True)
+        )
 
         # Output state
         self._state = {
-            'timestamp': 0.0,
-            'angles': self._gimbal_angles.copy(),
-            'sensors': {}
+            "timestamp": 0.0,
+            "angles": self._gimbal_angles.copy(),
+            "sensors": {},
         }
 
     def initialize(self, vehicle):
@@ -135,25 +147,27 @@ class GimbalSystem(GraphicalSensor):
     def _create_gimbal_mount(self, base_path: str):
         """Create the main gimbal mount structure."""
 
-        structure_config = self.gimbal_config.get('structure', {})
-        mount_size = structure_config.get('mount_size', [0.08, 0.08, 0.04])
-        mount_color = structure_config.get('mount_color', [80, 80, 80])
+        structure_config = self.gimbal_config.get("structure", {})
+        mount_size = structure_config.get("mount_size", [0.08, 0.08, 0.04])
+        mount_color = structure_config.get("mount_color", [80, 80, 80])
 
         mount = DynamicCuboid(
             prim_path=base_path,
             name="gimbal_base",
             position=np.array([0.0, 0.0, 0.0]),
             size=max(mount_size),
-            scale=np.array([
-                mount_size[0] / max(mount_size),
-                mount_size[1] / max(mount_size),
-                mount_size[2] / max(mount_size)
-            ]),
+            scale=np.array(
+                [
+                    mount_size[0] / max(mount_size),
+                    mount_size[1] / max(mount_size),
+                    mount_size[2] / max(mount_size),
+                ]
+            ),
             color=np.array(mount_color),
-            mass=0.2
+            mass=0.2,
         )
 
-        self._gimbal_prims['base'] = mount
+        self._gimbal_prims["base"] = mount
 
     def _create_gimbal_link(self, link_path: str, link_name: str):
         """Create a gimbal link/assembly."""
@@ -164,7 +178,7 @@ class GimbalSystem(GraphicalSensor):
             position=np.array([0.0, 0.0, 0.0]),
             size=0.03,  # Small link
             color=np.array([120, 120, 120]),
-            mass=0.05
+            mass=0.05,
         )
 
         self._gimbal_prims[link_name] = link
@@ -178,12 +192,14 @@ class GimbalSystem(GraphicalSensor):
             position=np.array([0.0, 0.0, 0.0]),
             size=0.04,  # Platform for sensors
             color=np.array([150, 150, 150]),
-            mass=0.1
+            mass=0.1,
         )
 
-        self._gimbal_prims['sensor_mount'] = mount
+        self._gimbal_prims["sensor_mount"] = mount
 
-    def _create_revolute_joint(self, stage, joint_name: str, parent_path: str, child_path: str, axis: str):
+    def _create_revolute_joint(
+        self, stage, joint_name: str, parent_path: str, child_path: str, axis: str
+    ):
         """Create a revolute joint between two bodies."""
 
         joint_path = f"{parent_path}/{joint_name}"
@@ -198,9 +214,9 @@ class GimbalSystem(GraphicalSensor):
 
         # Set joint limits based on configuration
         axis_lower = axis.lower()
-        if axis_lower in self.gimbal_config['joints']:
-            joint_config = self.gimbal_config['joints'][axis_lower]
-            joint_range = joint_config['range']
+        if axis_lower in self.gimbal_config["joints"]:
+            joint_config = self.gimbal_config["joints"][axis_lower]
+            joint_range = joint_config["range"]
 
             # Convert degrees to radians
             lower_limit = np.radians(joint_range[0])
@@ -215,29 +231,29 @@ class GimbalSystem(GraphicalSensor):
         drive.CreateTargetPositionAttr(0.0)
         drive.CreateTargetVelocityAttr(0.0)
         drive.CreateStiffnessAttr(1000.0)  # High stiffness for position control
-        drive.CreateDampingAttr(100.0)    # Damping for stability
+        drive.CreateDampingAttr(100.0)  # Damping for stability
 
         # Store joint reference
         self._joint_drives[axis_lower] = {
-            'joint': joint,
-            'drive': drive,
-            'path': joint_path
+            "joint": joint,
+            "drive": drive,
+            "path": joint_path,
         }
 
     def _attach_sensors(self):
         """Attach sensors to the gimbal based on configuration."""
 
-        sensor_configs = self.gimbal_config.get('sensors', {})
+        sensor_configs = self.gimbal_config.get("sensors", {})
 
         for sensor_name, sensor_config in sensor_configs.items():
-            if not sensor_config.get('enabled', True):
+            if not sensor_config.get("enabled", True):
                 continue
 
-            sensor_type = sensor_config['type']
+            sensor_type = sensor_config["type"]
 
-            if sensor_type == 'monocular_camera':
+            if sensor_type == "monocular_camera":
                 sensor = self._create_camera_sensor(sensor_name, sensor_config)
-            elif sensor_type == 'laser_rangefinder':
+            elif sensor_type == "laser_rangefinder":
                 sensor = self._create_rangefinder_sensor(sensor_name, sensor_config)
             else:
                 print(f"Warning: Unsupported sensor type: {sensor_type}")
@@ -250,16 +266,18 @@ class GimbalSystem(GraphicalSensor):
 
         # Convert config to MonocularCamera format
         camera_config = {
-            'position': np.array(sensor_config['position']),
-            'orientation': np.array(sensor_config['orientation']),
-            'resolution': sensor_config['resolution'],
-            'frequency': sensor_config['frequency'],
-            'diagonal_fov': sensor_config['fov'],
-            'depth': sensor_config.get('depth', False)
+            "position": np.array(sensor_config["position"]),
+            "orientation": np.array(sensor_config["orientation"]),
+            "resolution": sensor_config["resolution"],
+            "frequency": sensor_config["frequency"],
+            "diagonal_fov": sensor_config["fov"],
+            "depth": sensor_config.get("depth", False),
         }
 
         # Create camera relative to sensor mount
-        camera = MonocularCamera(f"{self._sensor_mount_path}/{sensor_name}", camera_config)
+        camera = MonocularCamera(
+            f"{self._sensor_mount_path}/{sensor_name}", camera_config
+        )
         camera.initialize(self._vehicle)
 
         return camera
@@ -269,16 +287,18 @@ class GimbalSystem(GraphicalSensor):
 
         # Convert config to LaserRangefinder format
         rangefinder_config = {
-            'position': np.array(sensor_config['position']),
-            'orientation': np.array(sensor_config['orientation']),
-            'max_range': sensor_config['max_range'],
-            'min_range': sensor_config['min_range'],
-            'frequency': sensor_config['frequency'],
-            'beam_width': sensor_config.get('beam_width', 0.01)
+            "position": np.array(sensor_config["position"]),
+            "orientation": np.array(sensor_config["orientation"]),
+            "max_range": sensor_config["max_range"],
+            "min_range": sensor_config["min_range"],
+            "frequency": sensor_config["frequency"],
+            "beam_width": sensor_config.get("beam_width", 0.01),
         }
 
         # Create rangefinder relative to sensor mount
-        rangefinder = LaserRangefinder(f"{self._sensor_mount_path}/{sensor_name}", rangefinder_config)
+        rangefinder = LaserRangefinder(
+            f"{self._sensor_mount_path}/{sensor_name}", rangefinder_config
+        )
         rangefinder.initialize(self._vehicle)
 
         return rangefinder
@@ -294,14 +314,14 @@ class GimbalSystem(GraphicalSensor):
         """
 
         # Clamp angles to joint limits
-        pitch = self._clamp_angle('pitch', pitch)
-        roll = self._clamp_angle('roll', roll)
-        yaw = self._clamp_angle('yaw', yaw)
+        pitch = self._clamp_angle("pitch", pitch)
+        roll = self._clamp_angle("roll", roll)
+        yaw = self._clamp_angle("yaw", yaw)
 
         # Update internal state
-        self._gimbal_angles['pitch'] = pitch
-        self._gimbal_angles['roll'] = roll
-        self._gimbal_angles['yaw'] = yaw
+        self._gimbal_angles["pitch"] = pitch
+        self._gimbal_angles["roll"] = roll
+        self._gimbal_angles["yaw"] = yaw
 
         # Apply to joint drives
         self._apply_joint_targets()
@@ -309,8 +329,8 @@ class GimbalSystem(GraphicalSensor):
     def _clamp_angle(self, axis: str, angle: float) -> float:
         """Clamp angle to joint limits."""
 
-        joint_config = self.gimbal_config['joints'][axis]
-        joint_range = joint_config['range']
+        joint_config = self.gimbal_config["joints"][axis]
+        joint_range = joint_config["range"]
 
         return np.clip(angle, joint_range[0], joint_range[1])
 
@@ -320,14 +340,14 @@ class GimbalSystem(GraphicalSensor):
         for axis, angle_deg in self._gimbal_angles.items():
             if axis in self._joint_drives:
                 angle_rad = np.radians(angle_deg)
-                drive = self._joint_drives[axis]['drive']
+                drive = self._joint_drives[axis]["drive"]
                 drive.GetTargetPositionAttr().Set(angle_rad)
 
     def start(self):
         """Start the gimbal system."""
         # Initialize sensors
         for sensor in self._sensors.values():
-            if hasattr(sensor, 'start'):
+            if hasattr(sensor, "start"):
                 sensor.start()
 
         # Set default position
@@ -337,11 +357,11 @@ class GimbalSystem(GraphicalSensor):
         """Stop the gimbal system."""
         # Stop sensors
         for sensor in self._sensors.values():
-            if hasattr(sensor, 'stop'):
+            if hasattr(sensor, "stop"):
                 sensor.stop()
 
     @GraphicalSensor.update_at_rate
-    def update(self, state: State, dt: float):
+    def update(self, state: VehicleState, dt: float):
         """
         Update gimbal system and sensors.
         """
@@ -353,23 +373,23 @@ class GimbalSystem(GraphicalSensor):
         # Update sensors
         sensor_data = {}
         for name, sensor in self._sensors.items():
-            if hasattr(sensor, 'update'):
+            if hasattr(sensor, "update"):
                 data = sensor.update(state, dt)
                 if data is not None:
                     sensor_data[name] = data
 
         # Update state
         self._state = {
-            'timestamp': time.time(),
-            'angles': self._gimbal_angles.copy(),
-            'sensors': sensor_data,
-            'control_mode': self._control_mode,
-            'stabilization_enabled': self._stabilization_enabled
+            "timestamp": time.time(),
+            "angles": self._gimbal_angles.copy(),
+            "sensors": sensor_data,
+            "control_mode": self._control_mode,
+            "stabilization_enabled": self._stabilization_enabled,
         }
 
         return self._state
 
-    def _update_stabilization(self, state: State):
+    def _update_stabilization(self, state: VehicleState):
         """
         Update gimbal stabilization to compensate for vehicle motion.
         """
@@ -378,23 +398,31 @@ class GimbalSystem(GraphicalSensor):
         vehicle_quat = state.attitude_inertial_frame  # [qw, qx, qy, qz]
 
         # Convert to Euler angles
-        vehicle_rot = Rotation.from_quat([vehicle_quat[1], vehicle_quat[2], vehicle_quat[3], vehicle_quat[0]])
-        vehicle_euler = vehicle_rot.as_euler('xyz', degrees=True)
+        vehicle_rot = Rotation.from_quat(
+            [vehicle_quat[1], vehicle_quat[2], vehicle_quat[3], vehicle_quat[0]]
+        )
+        vehicle_euler = vehicle_rot.as_euler("xyz", degrees=True)
 
         # Compensate for vehicle roll and pitch (keep yaw following vehicle)
-        compensation_rate = self.gimbal_config.get('control', {}).get('stabilization', {}).get('compensation_rate', 0.8)
+        compensation_rate = (
+            self.gimbal_config.get("control", {})
+            .get("stabilization", {})
+            .get("compensation_rate", 0.8)
+        )
 
         # Apply compensation (simplified stabilization)
         compensated_roll = -vehicle_euler[0] * compensation_rate
-        compensated_pitch = self._gimbal_angles['pitch'] - vehicle_euler[1] * compensation_rate
+        compensated_pitch = (
+            self._gimbal_angles["pitch"] - vehicle_euler[1] * compensation_rate
+        )
 
         # Clamp compensated angles
-        compensated_roll = self._clamp_angle('roll', compensated_roll)
-        compensated_pitch = self._clamp_angle('pitch', compensated_pitch)
+        compensated_roll = self._clamp_angle("roll", compensated_roll)
+        compensated_pitch = self._clamp_angle("pitch", compensated_pitch)
 
         # Apply compensation
-        self._gimbal_angles['roll'] = compensated_roll
-        self._gimbal_angles['pitch'] = compensated_pitch
+        self._gimbal_angles["roll"] = compensated_roll
+        self._gimbal_angles["pitch"] = compensated_pitch
 
         # Update joint targets
         self._apply_joint_targets()
@@ -411,4 +439,4 @@ class GimbalSystem(GraphicalSensor):
 
     def get_sensor_data(self):
         """Get data from all sensors."""
-        return self._state.get('sensors', {})
+        return self._state.get("sensors", {})

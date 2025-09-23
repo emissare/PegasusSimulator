@@ -45,16 +45,24 @@ def calculate_gps_measurements(
     # Apply noise and bias to position
     pos_with_noise = position_flu + noise_pos + gps_bias
 
+    # Convert FLU directly to ENU for reprojection function
+    # FLU (Front-Left-Up) to ENU (East-North-Up):
+    # ENU_x (East) = -FLU_y (negative Left = East)
+    # ENU_y (North) = FLU_x (Front = North)
+    # ENU_z (Up) = FLU_z (Up = Up)
+    pos_enu_with_noise = np.array([-pos_with_noise[1], pos_with_noise[0], pos_with_noise[2]])
+    pos_enu_gt = np.array([-position_flu[1], position_flu[0], position_flu[2]])
+
     # Reproject position to geographic coordinates
     latitude, longitude = reprojection(
-        pos_with_noise,
+        pos_enu_with_noise,
         np.radians(origin_lat),
         np.radians(origin_lon)
     )
 
     # Also calculate groundtruth position (without noise)
     latitude_gt, longitude_gt = reprojection(
-        position_flu,
+        pos_enu_gt,
         np.radians(origin_lat),
         np.radians(origin_lon)
     )

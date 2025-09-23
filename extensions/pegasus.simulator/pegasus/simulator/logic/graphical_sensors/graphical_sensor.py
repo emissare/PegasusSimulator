@@ -3,13 +3,14 @@
 | License: BSD-3-Clause. Copyright (c) 2024, Marcelo Jacinto. All rights reserved.
 | Description: Definition of the Sensor class which is used as the base for all the sensors.
 """
+
 __all__ = ["GraphicalSensor"]
 
 import time
-from pegasus.simulator.logic.state import State
+from pegasus.simulator.logic.vehicle_state import VehicleState
+
 
 class GraphicalSensor:
-
     """The base class for implementing a graphical sensor (such as a camera)
 
     Attributes:
@@ -34,7 +35,7 @@ class GraphicalSensor:
         self._vehicle = None
 
     def initialize(self, vehicle):
-        """A method that can be invoked when the simulation is starting to give access to the control backend 
+        """A method that can be invoked when the simulation is starting to give access to the control backend
         to the entire vehicle object. Even though we provide update_sensor and update_state callbacks that are called
         at every physics step with the latest vehicle state and its sensor data, having access to the full vehicle
         object may prove usefull under some circumstances. This is nice to give users the possibility of overiding
@@ -46,7 +47,7 @@ class GraphicalSensor:
         self._vehicle = vehicle
 
     def update_at_rate(fnc):
-        """Decorator function used to check if the time elapsed between the last sensor update call and the current 
+        """Decorator function used to check if the time elapsed between the last sensor update call and the current
         sensor update call is higher than the defined update_rate of the sensor. If so, we need to actually compute new
         values to simulate a measurement of the sensor at a given rate.
 
@@ -65,7 +66,7 @@ class GraphicalSensor:
         """
 
         # Define a wrapper function so that the "self" of the object can be passed to the function as well
-        def wrapper(self, state: State, dt: float):
+        def wrapper(self, state: VehicleState, dt: float):
 
             # Add the total time passed between the last time the sensor was updated and the current call
             self._total_time += dt
@@ -82,11 +83,13 @@ class GraphicalSensor:
 
                 return result
             return None
+
         return wrapper
-    
+
     """
      Properties
     """
+
     @property
     def vehicle(self):
         """A reference to the vehicle associated with this backend.
@@ -117,7 +120,7 @@ class GraphicalSensor:
         """
         return None
 
-    def update(self, state: State, dt: float):
+    def update(self, state: VehicleState, dt: float):
         """Method that should be implemented by the class that inherits Sensor. This is where the actual implementation
         of the sensor should be performed.
 
@@ -131,22 +134,19 @@ class GraphicalSensor:
         pass
 
     def start(self):
-        """Method that when implemented should handle the begining of the simulation of vehicle
-        """
+        """Method that when implemented should handle the begining of the simulation of vehicle"""
         pass
 
     def stop(self):
-        """Method that when implemented should handle the stopping of the simulation of vehicle
-        """
+        """Method that when implemented should handle the stopping of the simulation of vehicle"""
         pass
 
     def reset(self):
-        """Method that when implemented, should handle the reset of the vehicle simulation to its original state
-        """
+        """Method that when implemented, should handle the reset of the vehicle simulation to its original state"""
         pass
 
     def config_from_dict(self, config_dict):
-        """Method that should be implemented by the class that inherits Sensor. This is where the configuration of the 
+        """Method that should be implemented by the class that inherits Sensor. This is where the configuration of the
         sensor based on a dictionary input should be performed.
 
         Args:

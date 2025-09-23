@@ -162,7 +162,7 @@ class WidgetWindow(ui.Window):
                     with ui.HStack(height=20):
                         ui.Spacer()
                         ui.Label(
-                            "Build: 2025.09.21-v28",
+                            "Build: 2025.09.21-v29",
                             style={"color": 0x808080FF, "font_size": 12},
                         )
                         ui.Spacer()

@@ -4,45 +4,25 @@
 | License: BSD-3-Clause. Copyright (c) 2023, Marcelo Jacinto. All rights reserved.
 | Description: Simulates a gps. Based on the implementation provided in PX4 stil_gazebo (https://github.com/PX4/PX4-SITL_gazebo) by Amy Wagoner and Nuno Marques
 """
+
 __all__ = ["GPS"]
 
 import numpy as np
+from pegasus.simulator.logic.vehicle_state import VehicleState
 from pegasus.simulator.logic.sensors import Sensor
-from pegasus.simulator.logic.sensors.geo_mag_utils import reprojection
-from pegasus.simulator.logic.rotations import rot_FLU_inertial_to_NED_inertial
+from pegasus.simulator.logic.sensors.geo_mag_utils import convert_ned_to_geodetic
+from pegasus.simulator.logic.sensors.sensor_models import GPSState
 
 # TODO - Introduce delay on the GPS data
 
+
 class GPS(Sensor):
-    """The class that implements a GPS sensor. This class inherits the base class Sensor.
-    """
-
     def __init__(self, config={}):
-        """Initialize the GPS class.
-
-        Args:
-            config (dict): A Dictionary that contains all the parameters for configuring the GPS - it can be empty or only have some of the parameters used by the GPS.
-        
-        Examples:
-            The dictionary default parameters are
-
-            >>> {"fix_type": 3,
-            >>>  "eph": 1.0,
-            >>>  "epv": 1.0,
-            >>>  "sattelites_visible": 10,
-            >>>  "gps_xy_random_walk": 2.0,         # (m/s) / sqrt(hz)
-            >>>  "gps_z_random_walk": 4.0,          # (m/s) / sqrt(hz)
-            >>>  "gps_xy_noise_density": 2.0e-4,    # (m) / sqrt(hz)
-            >>>  "gps_z_noise_density": 4.0e-4,     # (m) / sqrt(hz)
-            >>>  "gps_vxy_noise_density": 0.2,      # (m/s) / sqrt(hz)
-            >>>  "gps_vz_noise_density": 0.4,       # (m/s) / sqrt(hz)
-            >>>  "gps_correlation_time": 60,        # s
-            >>>  "update_rate": 1.0                 # Hz
-            >>> }
-        """
-
         # Initialize the Super class "object" attributes
-        super().__init__(sensor_type="GPS", update_rate=config.get("update_rate", 250.0))
+        # Default GPS rate: 10 Hz (standard for PX4 SITL)
+        super().__init__(
+            sensor_type="GPS", update_rate=config.get("update_rate", 10.0)
+        )
 
         # Define the GPS simulated/fixed values
         self._fix_type = config.get("fix_type", 3)
@@ -52,142 +32,185 @@ class GPS(Sensor):
 
         # Parameters for GPS random walk
         self._random_walk_gps = np.array([0.0, 0.0, 0.0])
-        self._gps_xy_random_walk = config.get("gps_xy_random_walk", 2.0)  # (m/s) / sqrt(hz)
-        self._gps_z_random_walk = config.get("gps_z_random_walk", 4.0)  # (m/s) / sqrt(hz)
+        self._gps_xy_random_walk = config.get(
+            "gps_xy_random_walk", 2.0
+        )  # (m/s) / sqrt(hz)
+        self._gps_z_random_walk = config.get(
+            "gps_z_random_walk", 4.0
+        )  # (m/s) / sqrt(hz)
 
         # Parameters for the position noise
         self._noise_gps_pos = np.array([0.0, 0.0, 0.0])
-        self._gps_xy_noise_density = config.get("gps_xy_noise_density", 2.0e-4)  # (m) / sqrt(hz)
-        self._gps_z_noise_density = config.get("gps_z_noise_density", 4.0e-4)  # (m) / sqrt(hz)
+        self._gps_xy_noise_density = config.get(
+            "gps_xy_noise_density", 2.0e-4
+        )  # (m) / sqrt(hz)
+        self._gps_z_noise_density = config.get(
+            "gps_z_noise_density", 4.0e-4
+        )  # (m) / sqrt(hz)
 
         # Parameters for the velocity noise
         self._noise_gps_vel = np.array([0.0, 0.0, 0.0])
-        self._gps_vxy_noise_density = config.get("gps_vxy_noise_density", 0.2)  # (m/s) / sqrt(hz)
-        self._gps_vz_noise_density = config.get("gps_vz_noise_density", 0.4)  # (m/s) / sqrt(hz)
+        self._gps_vxy_noise_density = config.get(
+            "gps_vxy_noise_density", 0.2
+        )  # (m/s) / sqrt(hz)
+        self._gps_vz_noise_density = config.get(
+            "gps_vz_noise_density", 0.4
+        )  # (m/s) / sqrt(hz)
 
         # Parameters for the GPS bias
         self._gps_bias = np.array([0.0, 0.0, 0.0])
         self._gps_correlation_time = config.get("gps_correlation_time", 60)
 
-        # Save the current state measured by the GPS (and initialize at the origin)
-        self._state = {
-            "latitude": np.radians(self._origin_lat),
-            "longitude": np.radians(self._origin_lon),
-            "altitude": self._origin_alt,
-            "eph": 1.0,
-            "epv": 1.0,
-            "speed": 0.0,
-            "velocity_north": 0.0,
-            "velocity_east": 0.0,
-            "velocity_down": 0.0,
-            # Constant values
-            "fix_type": self._fix_type,
-            "eph": self._eph,
-            "epv": self._epv,
-            "cog": 0.0,
-            "sattelites_visible": self._sattelites_visible,
-            "latitude_gt": np.radians(self._origin_lat),
-            "longitude_gt": np.radians(self._origin_lon),
-            "altitude_gt": self._origin_alt,
-        }
+        # Initialize the GPS state with origin values
+        self._state = GPSState(
+            latitude_deg=self._origin_lat,
+            longitude_deg=self._origin_lon,
+            altitude_msl_m=self._origin_alt,
+            velocity_north_mps=0.0,
+            velocity_east_mps=0.0,
+            velocity_down_mps=0.0,
+            ground_speed_mps=0.0,
+            course_over_ground_cdeg=0,
+            horizontal_position_error_m=self._eph,
+            vertical_position_error_m=self._epv,
+            fix_type=self._fix_type,
+            satellites_visible=self._sattelites_visible,
+            latitude_groundtruth_deg=self._origin_lat,
+            longitude_groundtruth_deg=self._origin_lon,
+            altitude_groundtruth_msl_m=self._origin_alt,
+        )
 
     @property
-    def state(self):
-        """
-        (dict) The 'state' of the sensor, i.e. the data produced by the sensor at any given point in time
-        """
+    def state(self) -> GPSState:
         return self._state
 
-    @Sensor.update_at_rate
-    def update(self, state: np.ndarray, dt: float):
-        """Method that implements the logic of a gps. In this method we start by generating the GPS bias terms which are then
-        added to the real position of the vehicle, expressed in ENU inertial frame. This position affected by noise
-        is reprojected in order to obtain the corresponding latitude and longitude. Additionally, to the linear velocity, noise
-        is added.
+    def update(self, state: VehicleState, current_time_s: float):
+        # Check if it's time to update
+        if not self.should_update(current_time_s):
+            return None
 
-        Args:
-            state (State): The current state of the vehicle.
-            dt (float): The time elapsed between the previous and current function calls (s).
+        # Calculate dt for this update
+        dt = current_time_s - self._prev_update_time_s
+        self._prev_update_time_s = current_time_s
 
-        Returns:
-            (dict) A dictionary containing the current state of the sensor (the data produced by the sensor)
-        """
+        self._random_walk_gps[0] = (
+            self._gps_xy_random_walk * np.sqrt(dt) * np.random.randn()
+        )
+        self._random_walk_gps[1] = (
+            self._gps_xy_random_walk * np.sqrt(dt) * np.random.randn()
+        )
+        self._random_walk_gps[2] = (
+            self._gps_z_random_walk * np.sqrt(dt) * np.random.randn()
+        )
 
-        # Update noise parameters
-        self._random_walk_gps[0] = self._gps_xy_random_walk * np.sqrt(dt) * np.random.randn()
-        self._random_walk_gps[1] = self._gps_xy_random_walk * np.sqrt(dt) * np.random.randn()
-        self._random_walk_gps[2] = self._gps_z_random_walk * np.sqrt(dt) * np.random.randn()
+        self._noise_gps_pos[0] = (
+            self._gps_xy_noise_density * np.sqrt(dt) * np.random.randn()
+        )
+        self._noise_gps_pos[1] = (
+            self._gps_xy_noise_density * np.sqrt(dt) * np.random.randn()
+        )
+        self._noise_gps_pos[2] = (
+            self._gps_z_noise_density * np.sqrt(dt) * np.random.randn()
+        )
 
-        self._noise_gps_pos[0] = self._gps_xy_noise_density * np.sqrt(dt) * np.random.randn()
-        self._noise_gps_pos[1] = self._gps_xy_noise_density * np.sqrt(dt) * np.random.randn()
-        self._noise_gps_pos[2] = self._gps_z_noise_density * np.sqrt(dt) * np.random.randn()
-
-        self._noise_gps_vel[0] = self._gps_vxy_noise_density * np.sqrt(dt) * np.random.randn()
-        self._noise_gps_vel[1] = self._gps_vxy_noise_density * np.sqrt(dt) * np.random.randn()
-        self._noise_gps_vel[2] = self._gps_vz_noise_density * np.sqrt(dt) * np.random.randn()
+        self._noise_gps_vel[0] = (
+            self._gps_vxy_noise_density * np.sqrt(dt) * np.random.randn()
+        )
+        self._noise_gps_vel[1] = (
+            self._gps_vxy_noise_density * np.sqrt(dt) * np.random.randn()
+        )
+        self._noise_gps_vel[2] = (
+            self._gps_vz_noise_density * np.sqrt(dt) * np.random.randn()
+        )
 
         # Perform GPS bias integration (using euler integration -> to be improved)
         self._gps_bias[0] = (
-            self._gps_bias[0] + self._random_walk_gps[0] * dt - self._gps_bias[0] / self._gps_correlation_time
+            self._gps_bias[0]
+            + self._random_walk_gps[0] * dt
+            - self._gps_bias[0] / self._gps_correlation_time
         )
         self._gps_bias[1] = (
-            self._gps_bias[1] + self._random_walk_gps[1] * dt - self._gps_bias[1] / self._gps_correlation_time
+            self._gps_bias[1]
+            + self._random_walk_gps[1] * dt
+            - self._gps_bias[1] / self._gps_correlation_time
         )
         self._gps_bias[2] = (
-            self._gps_bias[2] + self._random_walk_gps[2] * dt - self._gps_bias[2] / self._gps_correlation_time
+            self._gps_bias[2]
+            + self._random_walk_gps[2] * dt
+            - self._gps_bias[2] / self._gps_correlation_time
         )
 
-        # reproject position with noise into geographic coordinates
-        pos_with_noise: np.ndarray = state.position + self._noise_gps_pos + self._gps_bias
-        latitude, longitude = reprojection(pos_with_noise, np.radians(self._origin_lat), np.radians(self._origin_lon))
+        # Get NED position directly from state (already converted)
+        position_ned_m = state.position_ned_m
 
-        # Compute the values of the latitude and longitude without noise (for groundtruth measurements)
-        latitude_gt, longitude_gt = reprojection(
-            state.position, np.radians(self._origin_lat), np.radians(self._origin_lon)
+        # Add noise and bias in NED frame
+        position_with_noise_ned_m = (
+            position_ned_m  # + self._noise_gps_pos + self._gps_bias
         )
 
-        # Add noise to the velocity expressed in the world frame
-        velocity: np.ndarray = state.linear_velocity  # + self._noise_gps_vel
+        # Ground truth position (without noise)
+        position_groundtruth_ned_m = position_ned_m
 
-        # Compute the xy speed
-        speed: float = np.linalg.norm(velocity[:2])
+        # Convert NED positions to geodetic coordinates (latitude/longitude)
+        latitude_rad, longitude_rad = convert_ned_to_geodetic(
+            position_with_noise_ned_m,
+            np.radians(self._origin_lat),
+            np.radians(self._origin_lon),
+        )
 
-        # Course over ground (NOT heading, but direction of movement),
-        # 0.0..359.99 degrees. If unknown, set to: 65535 [cdeg] (type:uint16_t)
-        ve = velocity[0]
-        vn = velocity[1]
-        cog = np.degrees(np.arctan2(ve, vn))
+        # Compute the groundtruth latitude and longitude (without noise)
+        latitude_groundtruth_rad, longitude_groundtruth_rad = convert_ned_to_geodetic(
+            position_groundtruth_ned_m,
+            np.radians(self._origin_lat),
+            np.radians(self._origin_lon),
+        )
 
-        if cog < 0.0:
-            cog = cog + 360.0
+        # Get NED velocity directly from state (already converted)
+        velocity_ned_mps = state.velocity_ned_mps
 
-        cog = cog * 100
+        # Add noise to velocity
+        velocity_with_noise_ned_mps = velocity_ned_mps + self._noise_gps_vel
 
-        # Convert velocity from FLU inertial to NED inertial
-        # FLU: X=Front/North, Y=Left/West, Z=Up
-        # NED: X=North, Y=East, Z=Down
-        velocity_ned = rot_FLU_inertial_to_NED_inertial.apply(velocity)
+        # Compute ground speed (horizontal speed in m/s)
+        ground_speed_mps: float = np.linalg.norm(velocity_with_noise_ned_mps[:2])
 
-        # Add the values to the dictionary and return it
-        self._state = {
-            "latitude": np.degrees(latitude),
-            "longitude": np.degrees(longitude),
-            "altitude": state.position[2] + self._origin_alt - self._noise_gps_pos[2] + self._gps_bias[2],
-            "eph": 1.0,
-            "epv": 1.0,
-            "speed": speed,
-            "velocity_north": velocity_ned[0],
-            "velocity_east": velocity_ned[1],
-            "velocity_down": velocity_ned[2],
-            # Constant values
-            "fix_type": self._fix_type,
-            "eph": self._eph,
-            "epv": self._epv,
-            "cog": 0.0,  # cog,
-            "sattelites_visible": self._sattelites_visible,
-            "latitude_gt": latitude_gt,
-            "longitude_gt": longitude_gt,
-            "altitude_gt": state.position[2] + self._origin_alt,
-        }
+        # Course over ground (direction of movement, not heading)
+        # Calculated from NED velocities: atan2(East, North)
+        # Output in centidegrees (0-35999)
+        course_over_ground_rad = np.arctan2(
+            velocity_with_noise_ned_mps[1], velocity_with_noise_ned_mps[0]
+        )
+        course_over_ground_deg = np.degrees(course_over_ground_rad)
 
-        return self._state
+        if course_over_ground_deg < 0.0:
+            course_over_ground_deg = course_over_ground_deg + 360.0
+
+        course_over_ground_cdeg = course_over_ground_deg * 100  # centidegrees
+
+        # Altitude is negative of NED down coordinate
+        altitude_with_noise_m = (
+            -position_with_noise_ned_m[2]  # Negative because NED down is positive
+            + self._origin_alt
+        )
+        altitude_groundtruth_m = -position_ned_m[2] + self._origin_alt
+
+        self._state = GPSState(
+            latitude_deg=np.degrees(latitude_rad),
+            longitude_deg=np.degrees(longitude_rad),
+            altitude_msl_m=altitude_with_noise_m,
+            velocity_north_mps=velocity_with_noise_ned_mps[0],
+            velocity_east_mps=velocity_with_noise_ned_mps[1],
+            velocity_down_mps=velocity_with_noise_ned_mps[2],
+            ground_speed_mps=ground_speed_mps,
+            course_over_ground_cdeg=int(course_over_ground_cdeg),
+            horizontal_position_error_m=self._eph,
+            vertical_position_error_m=self._epv,
+            fix_type=self._fix_type,
+            satellites_visible=self._sattelites_visible,
+            latitude_groundtruth_deg=np.degrees(latitude_groundtruth_rad),
+            longitude_groundtruth_deg=np.degrees(longitude_groundtruth_rad),
+            altitude_groundtruth_msl_m=altitude_groundtruth_m,
+        )
+
+        self._has_new_data = True
+        return self._state  # Return the GPSState object directly

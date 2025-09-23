@@ -50,8 +50,8 @@ class Multirotor(Vehicle):
         config_file: str = "",  # YAML config file path (required)
         vehicle_id: int = 0,
         # Spawning pose of the vehicle
-        init_pos=[0.0, 0.0, 0.07],
-        init_orientation=[0.0, 0.0, 0.0, 1.0],
+        init_pos_enu_m=[0.0, 0.0, 0.07],
+        init_orientation_quat_xyzw=[0.0, 0.0, 0.0, 1.0],
     ):
         """Initializes the multirotor object from YAML configuration
 
@@ -59,8 +59,8 @@ class Multirotor(Vehicle):
             stage_prefix (str): The name the vehicle will present in the simulator when spawned. Defaults to "quadrotor".
             config_file (str): Path to vehicle YAML configuration file (required).
             vehicle_id (int): The id to be used for the vehicle. Defaults to 0.
-            init_pos (list): The initial position of the vehicle in the inertial frame (in ENU convention). Defaults to [0.0, 0.0, 0.07].
-            init_orientation (list): The initial orientation of the vehicle in quaternion [qx, qy, qz, qw]. Defaults to [0.0, 0.0, 0.0, 1.0].
+            init_pos_enu_m (list): The initial position of the vehicle in the ENU inertial frame in meters. Defaults to [0.0, 0.0, 0.07].
+            init_orientation_quat_xyzw (list): The initial orientation of the vehicle as quaternion [qx, qy, qz, qw]. Defaults to [0.0, 0.0, 0.0, 1.0].
         """
 
         # Store stage prefix immediately (needed for __del__ if initialization fails) - BUILD v2
@@ -109,8 +109,8 @@ class Multirotor(Vehicle):
         super().__init__(
             stage_prefix,
             "",
-            init_pos,
-            init_orientation,
+            init_pos_enu_m,
+            init_orientation_quat_xyzw,
             sensors,
             graphical_sensors,
             graphs,

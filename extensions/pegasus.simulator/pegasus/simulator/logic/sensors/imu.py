@@ -4,23 +4,21 @@
 | License: BSD-3-Clause. Copyright (c) 2023, Marcelo Jacinto. All rights reserved.
 | Description: Simulates an imu. Based on the implementation provided in PX4 stil_gazebo (https://github.com/PX4/PX4-SITL_gazebo)
 """
+
 __all__ = ["IMU"]
 
 import numpy as np
 from scipy.spatial.transform import Rotation
 
-from pegasus.simulator.logic.state import State
+from pegasus.simulator.logic.vehicle_state import VehicleState
 from pegasus.simulator.logic.sensors import Sensor
-from pegasus.simulator.logic.rotations import (
-    rot_FLU_body_to_FRD_body,
-    rot_FLU_inertial_to_NED_inertial
-)
+from pegasus.simulator.logic.sensors.sensor_models import IMUState
 from pegasus.simulator.logic.sensors.geo_mag_utils import GRAVITY_VECTOR
 
 
 class IMU(Sensor):
-    """The class that implements the IMU sensor. This class inherits the base class Sensor.
-    """
+    """The class that implements the IMU sensor. This class inherits the base class Sensor."""
+
     def __init__(self, config={}):
         """Initialize the IMU class
 
@@ -45,7 +43,9 @@ class IMU(Sensor):
         """
 
         # Initialize the Super class "object" attributes
-        super().__init__(sensor_type="IMU", update_rate=config.get("update_rate", 250.0))
+        super().__init__(
+            sensor_type="IMU", update_rate=config.get("update_rate", 250.0)
+        )
 
         # Orientation noise constant
         self._orientation_noise: float = 0.0
@@ -53,39 +53,59 @@ class IMU(Sensor):
         # Gyroscope noise constants
         self._gyroscope_bias: np.ndarray = np.zeros((3,))
         gyroscope_config = config.get("gyroscope", {})
-        self._gyroscope_noise_density = gyroscope_config.get("noise_density", 0.0003393695767766752)
-        self._gyroscope_random_walk = gyroscope_config.get("random_walk", 3.878509448876288E-05)
-        self._gyroscope_bias_correlation_time = gyroscope_config.get("bias_correlation_time", 1.0E3)
-        self._gyroscope_turn_on_bias_sigma = gyroscope_config.get("turn_on_bias_sigma", 0.008726646259971648)
+        self._gyroscope_noise_density = gyroscope_config.get(
+            "noise_density", 0.0003393695767766752
+        )
+        self._gyroscope_random_walk = gyroscope_config.get(
+            "random_walk", 3.878509448876288e-05
+        )
+        self._gyroscope_bias_correlation_time = gyroscope_config.get(
+            "bias_correlation_time", 1.0e3
+        )
+        self._gyroscope_turn_on_bias_sigma = gyroscope_config.get(
+            "turn_on_bias_sigma", 0.008726646259971648
+        )
 
         # Accelerometer noise constants
         self._accelerometer_bias: np.ndarray = np.zeros((3,))
         accelerometer_config = config.get("accelerometer", {})
-        self._accelerometer_noise_density = accelerometer_config.get("noise_density", 0.004)
+        self._accelerometer_noise_density = accelerometer_config.get(
+            "noise_density", 0.004
+        )
         self._accelerometer_random_walk = accelerometer_config.get("random_walk", 0.006)
-        self._accelerometer_bias_correlation_time = accelerometer_config.get("bias_correlation_time", 300.0)
-        self._accelerometer_turn_on_bias_sigma = accelerometer_config.get("turn_on_bias_sigma", 0.196)
+        self._accelerometer_bias_correlation_time = accelerometer_config.get(
+            "bias_correlation_time", 300.0
+        )
+        self._accelerometer_turn_on_bias_sigma = accelerometer_config.get(
+            "turn_on_bias_sigma", 0.196
+        )
 
-        # Auxiliar variable used to compute the linear acceleration of the vehicle
-        self._prev_linear_velocity = np.zeros((3,))
-
-        # Save the current state measured by the IMU
-        self._state = {
-            "orientation": np.array([1.0, 0.0, 0.0, 0.0]),
-            "angular_velocity": np.array([0.0, 0.0, 0.0]),
-            "linear_acceleration": np.array([0.0, 0.0, 0.0]),
-        }
+        # Initialize the IMU state with default values
+        self._state = IMUState(
+            orientation_quat_frd_ned=[
+                0.0,
+                0.0,
+                0.0,
+                1.0,
+            ],  # Identity quaternion [qx, qy, qz, qw]
+            angular_velocity_frd_body_rps=[0.0, 0.0, 0.0],
+            linear_acceleration_frd_body_mpss=[
+                0.0,
+                0.0,
+                9.80665,
+            ],  # Gravity compensation
+        )
 
     @property
-    def state(self):
+    def state(self) -> IMUState:
         """
-        (dict) The 'state' of the sensor, i.e. the data produced by the sensor at any given point in time
+        Returns:
+            IMUState: The current IMU sensor state with all measurements properly typed
         """
         return self._state
 
-    @Sensor.update_at_rate
-    def update(self, state: State, dt: float):
-        """Method that implements the logic of an IMU. In this method we start by generating the random walk of the 
+    def update(self, state: VehicleState, current_time_s: float):
+        """Method that implements the logic of an IMU. In this method we start by generating the random walk of the
         gyroscope. This value is then added to the real angular velocity of the vehicle (FLU relative to ENU inertial frame
         expressed in FLU body frame). The same logic is followed for the accelerometer and the accelerations. After this step,
         the angular velocity is rotated such that it expressed a FRD body frame, relative to a NED inertial frame, expressed
@@ -93,12 +113,20 @@ class IMU(Sensor):
         FRD frame of the vehicle. This sensor outputs data that follows the PX4 adopted standard.
 
         Args:
-            state (State): The current state of the vehicle.
-            dt (float): The time elapsed between the previous and current function calls (s).
+            state (VehicleState): The current state of the vehicle.
+            current_time_s (float): Current simulation time in seconds.
 
         Returns:
-            (dict) A dictionary containing the current state of the sensor (the data produced by the sensor)
+            (IMUState) The current state of the sensor, or None if not time to update
         """
+
+        # Check if it's time to update
+        if not self.should_update(current_time_s):
+            return None
+
+        # Calculate dt for this update
+        dt = current_time_s - self._prev_update_time_s
+        self._prev_update_time_s = current_time_s
 
         # Gyroscopic terms
         tau_g: float = self._accelerometer_bias_correlation_time
@@ -108,17 +136,24 @@ class IMU(Sensor):
         sigma_b_g: float = self._gyroscope_random_walk
 
         # Compute exact covariance of the process after dt [Maybeck 4-114]
-        sigma_b_g_d: float = np.sqrt(-sigma_b_g * sigma_b_g * tau_g / 2.0 * (np.exp(-2.0 * dt / tau_g) - 1.0))
+        sigma_b_g_d: float = np.sqrt(
+            -sigma_b_g * sigma_b_g * tau_g / 2.0 * (np.exp(-2.0 * dt / tau_g) - 1.0)
+        )
 
         # Compute state-transition
         phi_g_d: float = np.exp(-1.0 / tau_g * dt)
 
-        # Simulate gyroscope noise processes and add them to the true angular rate.
-        angular_velocity: np.ndarray = np.zeros((3,))
+        # Get angular velocity in FRD body frame (already converted)
+        angular_velocity_frd: np.ndarray = state.angular_velocity_frd_rps.copy()
 
+        # Add noise to angular velocity
         for i in range(3):
-            self._gyroscope_bias[i] = phi_g_d * self._gyroscope_bias[i] + sigma_b_g_d * np.random.randn()
-            angular_velocity[i] = state.angular_velocity[i] + sigma_g_d * np.random.randn() + self._gyroscope_bias[i]
+            self._gyroscope_bias[i] = (
+                phi_g_d * self._gyroscope_bias[i] + sigma_b_g_d * np.random.randn()
+            )
+            angular_velocity_frd[i] += (
+                sigma_g_d * np.random.randn() + self._gyroscope_bias[i]
+            )
 
         # Accelerometer terms
         tau_a: float = self._accelerometer_bias_correlation_time
@@ -128,51 +163,37 @@ class IMU(Sensor):
         sigma_b_a: float = self._accelerometer_random_walk
 
         # Compute exact covariance of the process after dt [Maybeck 4-114].
-        sigma_b_a_d: float = np.sqrt(-sigma_b_a * sigma_b_a * tau_a / 2.0 * (np.exp(-2.0 * dt / tau_a) - 1.0))
+        sigma_b_a_d: float = np.sqrt(
+            -sigma_b_a * sigma_b_a * tau_a / 2.0 * (np.exp(-2.0 * dt / tau_a) - 1.0)
+        )
 
         # Compute state-transition.
         phi_a_d: float = np.exp(-1.0 / tau_a * dt)
 
-        # Compute the linear acceleration from diferentiating the velocity of the vehicle expressed in the inertial frame
-        linear_acceleration_inertial = (state.linear_velocity - self._prev_linear_velocity) / dt
-        linear_acceleration_inertial = linear_acceleration_inertial - GRAVITY_VECTOR
+        # Get acceleration in NED frame (already calculated by VehicleState)
+        acceleration_ned = state.acceleration_ned_mpss - GRAVITY_VECTOR
 
-        # Update the previous linear velocity for the next computation
-        self._prev_linear_velocity = state.linear_velocity
+        # Convert acceleration from NED inertial to FRD body frame
+        attitude_frd_ned = Rotation.from_quat(state.attitude_frd_ned_quat)
+        linear_acceleration_frd = attitude_frd_ned.inv().apply(acceleration_ned)
 
-        # Compute the linear acceleration of the body frame, with respect to the inertial frame, expressed in the body frame
-        linear_acceleration = np.array(Rotation.from_quat(state.attitude).inv().apply(linear_acceleration_inertial))
-
-        # Simulate the accelerometer noise processes and add them to the true linear aceleration values
+        # Add noise to linear acceleration
         for i in range(3):
-            self._accelerometer_bias[i] = phi_a_d * self._accelerometer_bias[i] + sigma_b_a_d * np.random.rand()
-            linear_acceleration[i] = (
-                linear_acceleration[i] + sigma_a_d * np.random.randn()
-            ) #+ self._accelerometer_bias[i]
+            self._accelerometer_bias[i] = (
+                phi_a_d * self._accelerometer_bias[i] + sigma_b_a_d * np.random.rand()
+            )
+            linear_acceleration_frd[i] += (
+                sigma_a_d * np.random.randn()
+            )  # + self._accelerometer_bias[i]
 
-        # TODO - Add small "noisy" to the attitude
+        # Get attitude directly from state (already in FRD/NED)
+        attitude_frd_ned_quat = state.attitude_frd_ned_quat
 
-        # --------------------------------------------------------------------------------------------
-        # Apply rotations such that we express the IMU data according to the FRD body frame convention
-        # --------------------------------------------------------------------------------------------
+        self._state = IMUState(
+            orientation_quat_frd_ned=attitude_frd_ned_quat.tolist(),
+            angular_velocity_frd_body_rps=angular_velocity_frd.tolist(),
+            linear_acceleration_frd_body_mpss=linear_acceleration_frd.tolist(),
+        )
 
-        # Convert the orientation from FLU/FLU to FRD/NED standard
-        # Input: FLU body in FLU inertial (from Isaac)
-        # Output: FRD body in NED inertial (for PX4)
-        attitude_flu_flu = Rotation.from_quat(state.attitude)
-        attitude_frd_ned = rot_FLU_inertial_to_NED_inertial * attitude_flu_flu * rot_FLU_body_to_FRD_body
-
-        # Convert the angular velocity from FLU body to FRD body frame
-        angular_velocity_frd = rot_FLU_body_to_FRD_body.apply(angular_velocity)
-
-        # Convert the linear acceleration from FLU body to FRD body frame
-        linear_acceleration_frd = rot_FLU_body_to_FRD_body.apply(linear_acceleration)
-
-        # Add the values to the dictionary and return it
-        self._state = {
-            "orientation": attitude_frd_ned.as_quat(),
-            "angular_velocity": angular_velocity_frd,
-            "linear_acceleration": linear_acceleration_frd,
-        }
-
-        return self._state
+        self._has_new_data = True
+        return self._state  # Return the IMUState object directly
