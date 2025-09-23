@@ -1,10 +1,11 @@
 """
-| File: px4_mavlink_backend.py
+| File: px4_backend.py
 | Author: Marcelo Jacinto (marcelo.jacinto@tecnico.ulisboa.pt)
 | Description: File that implements the Mavlink Backend for communication/control with/of the vehicle simulation
 | License: BSD-3-Clause. Copyright (c) 2023, Marcelo Jacinto. All rights reserved.
 """
-__all__ = ["PX4MavlinkBackend", "PX4MavlinkBackendConfig"]
+
+__all__ = ["PX4Backend", "PX4BackendConfig"]
 
 import carb
 import time
@@ -12,13 +13,14 @@ import numpy as np
 from pymavlink import mavutil
 
 from pegasus.simulator.logic.state import State
-from pegasus.simulator.logic.backends.backend import Backend, BackendConfig
+
+# Removed backend abstraction - no longer needed
 from pegasus.simulator.logic.interface.pegasus_interface import PegasusInterface
-from pegasus.simulator.logic.backends.tools.px4_launch_tool import PX4LaunchTool
+from pegasus.simulator.logic.px4_launch_tool import PX4LaunchTool
 
 
 class SensorSource:
-    """ The binary codes to signal which simulated data is being sent through mavlink
+    """The binary codes to signal which simulated data is being sent through mavlink
 
     Atribute:
         | ACCEL (int): mavlink binary code for the accelerometer (0b0000000000111 = 7)
@@ -28,9 +30,9 @@ class SensorSource:
         | DIFF_PRESS (int): mavlink binary code for the pressure sensor (0b0010000000000=1024)
     """
 
-    ACCEL: int = 7    
-    GYRO: int = 56          
-    MAG: int = 448        
+    ACCEL: int = 7
+    GYRO: int = 56
+    MAG: int = 448
     BARO: int = 6656
     DIFF_PRESS: int = 1024
 
@@ -83,21 +85,15 @@ class SensorMsg:
         self.cog: float = 0.0
         self.satellites_visible: int = 0
 
-        # Vision Pose
-        self.new_vision_data: bool = False
-        self.vision_x: float = 0.0
-        self.vision_y: float = 0.0
-        self.vision_z: float = 0.0
-        self.vision_roll: float = 0.0
-        self.vision_pitch: float = 0.0
-        self.vision_yaw: float = 0.0
-        self.vision_covariance = (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
-
         # Simulation State
         self.new_sim_state: bool = False
         self.sim_attitude = [1.0, 0.0, 0.0, 0.0]  # [w, x, y, z]
         self.sim_acceleration = [0.0, 0.0, 0.0]  # [x,y,z body acceleration]
-        self.sim_angular_vel = [0.0, 0.0, 0.0]  # [roll-rate, pitch-rate, yaw-rate] rad/s
+        self.sim_angular_vel = [
+            0.0,
+            0.0,
+            0.0,
+        ]  # [roll-rate, pitch-rate, yaw-rate] rad/s
         self.sim_lat = 0.0  # [deg]
         self.sim_lon = 0.0  # [deg]
         self.sim_alt = 0.0  # [m]
@@ -108,7 +104,7 @@ class SensorMsg:
 
 class ThrusterControl:
     """
-    An auxiliary data class that saves the thrusters command data received via mavlink and 
+    An auxiliary data class that saves the thrusters command data received via mavlink and
     scales them into individual angular velocities expressed in rad/s to apply to each rotor
     """
 
@@ -164,14 +160,14 @@ class ThrusterControl:
         if len(controls) < self.num_rotors:
             carb.log_warn("Did not receive enough inputs for all the rotors")
             return
-        
 
         # Update the desired reference for every rotor (and saturate according to the min and max values)
         for i in range(self.num_rotors):
-            
-            # Compute the actual velocity reference to apply to each rotor
-            self._input_reference[i] = (controls[i] + self.input_offset[i]) * self.input_scaling[i] + self.zero_position_armed[i]
 
+            # Compute the actual velocity reference to apply to each rotor
+            self._input_reference[i] = (
+                controls[i] + self.input_offset[i]
+            ) * self.input_scaling[i] + self.zero_position_armed[i]
 
     def zero_input_reference(self):
         """
@@ -180,7 +176,7 @@ class ThrusterControl:
         self._input_reference = [0.0 for i in range(self.num_rotors)]
 
 
-class PX4MavlinkBackendConfig(BackendConfig):
+class PX4BackendConfig:
     """
     An auxiliary data class used to store all the configurations for the mavlink communications.
     """
@@ -191,12 +187,12 @@ class PX4MavlinkBackendConfig(BackendConfig):
 
         Args:
             config (dict): A Dictionary that contains all the parameters for configuring the Mavlink interface - it can be empty or only have some of the parameters used by this backend.
-        
+
         Examples:
             The dictionary default parameters are
 
-            >>> {"vehicle_id": 0,           
-            >>>  "connection_type": "tcpin",           
+            >>> {"vehicle_id": 0,
+            >>>  "connection_type": "tcpin",
             >>>  "connection_ip": "localhost",
             >>>  "connection_baseport": 4560,
             >>>  "px4_autolaunch": True,
@@ -213,7 +209,7 @@ class PX4MavlinkBackendConfig(BackendConfig):
 
         # Configurations for the mavlink communication protocol (note: the vehicle id is sumed to the connection_baseport)
         self.config = config
-        
+
         self.vehicle_id = self.config.get("vehicle_id", 0)
         self.connection_type = self.config.get("connection_type", "tcpin")
         self.connection_ip = self.config.get("connection_ip", "localhost")
@@ -222,38 +218,44 @@ class PX4MavlinkBackendConfig(BackendConfig):
         # Configure whether to launch px4 in the background automatically or not for every vehicle launched
         self.px4_autolaunch: bool = self.config.get("px4_autolaunch", True)
         self.px4_dir: str = self.config.get("px4_dir", PegasusInterface().px4_path)
-        self.px4_vehicle_model: str = self.config.get("px4_vehicle_model", "gazebo-classic_iris")
+        self.px4_vehicle_model: str = self.config.get(
+            "px4_vehicle_model", "gazebo-classic_iris"
+        )
 
         # Configurations to interpret the rotors control messages coming from mavlink
         self.enable_lockstep: bool = self.config.get("enable_lockstep", True)
         self.num_rotors: int = self.config.get("num_rotors", 4)
         self.input_offset = self.config.get("input_offset", [0.0, 0.0, 0.0, 0.0])
-        self.input_scaling = self.config.get("input_scaling", [1000.0, 1000.0, 1000.0, 1000.0])
-        self.zero_position_armed = self.config.get("zero_position_armed", [100.0, 100.0, 100.0, 100.0])
+        self.input_scaling = self.config.get(
+            "input_scaling", [1000.0, 1000.0, 1000.0, 1000.0]
+        )
+        self.zero_position_armed = self.config.get(
+            "zero_position_armed", [100.0, 100.0, 100.0, 100.0]
+        )
 
         # The update rate at which we will be sending data to mavlink (TODO - remove this from here in the future
         # and infer directly from the function calls)
         self.update_rate: float = self.config.get("update_rate", 250.0)  # [Hz]
 
 
-class PX4MavlinkBackend(Backend):
-    """ The Mavlink Backend used to receive the vehicle's state and sensor data in order to send to PX4 through mavlink. It also
+class PX4Backend:
+    """The Mavlink Backend used to receive the vehicle's state and sensor data in order to send to PX4 through mavlink. It also
     receives via mavlink the thruster commands to apply to each vehicle rotor.
     """
 
-    def __init__(self, config: PX4MavlinkBackendConfig = PX4MavlinkBackendConfig()):
-        """Initialize the PX4MavlinkBackend
+    def __init__(self, config: PX4BackendConfig = PX4BackendConfig()):
+        """Initialize the PX4Backend
 
         Args:
-            config (PX4MavlinkBackendConfig): The configuration class for the PX4MavlinkBackend. Defaults to PX4MavlinkBackendConfig().
+            config (PX4BackendConfig): The configuration class for the PX4Backend. Defaults to PX4BackendConfig().
         """
 
-        # Initialize the Backend object
-        super().__init__(config)
+        # Store configuration and initialize vehicle reference
+        self._vehicle = None
+        self.config: PX4BackendConfig = config
 
         # Setup the desired mavlink connection port
         # The connection will only be created once the simulation starts
-        self.config: PX4MavlinkBackendConfig = config
         self._vehicle_id = self.config.vehicle_id
         self._connection = None
         self._connection_port = (
@@ -266,7 +268,9 @@ class PX4MavlinkBackend(Backend):
 
         # Check if we need to autolaunch px4 in the background or not
         self.px4_autolaunch: bool = self.config.px4_autolaunch
-        self.px4_vehicle_model: str = self.config.px4_vehicle_model  # only needed if px4_autolaunch == True
+        self.px4_vehicle_model: str = (
+            self.config.px4_vehicle_model
+        )  # only needed if px4_autolaunch == True
         self.px4_tool: PX4LaunchTool = None
         self.px4_dir: str = self.config.px4_dir
 
@@ -281,7 +285,10 @@ class PX4MavlinkBackend(Backend):
 
         # Vehicle Rotor data received from mavlink
         self._rotor_data: ThrusterControl = ThrusterControl(
-            self.config.num_rotors, self.config.input_offset, self.config.input_scaling, self.config.zero_position_armed
+            self.config.num_rotors,
+            self.config.input_offset,
+            self.config.input_scaling,
+            self.config.zero_position_armed,
         )
 
         # Vehicle actuator control data
@@ -308,9 +315,27 @@ class PX4MavlinkBackend(Backend):
         # Auxiliar variables for setting the u_time when sending sensor data to px4
         self._current_utime: int = 0
 
+    @property
+    def vehicle(self):
+        """A reference to the vehicle associated with this backend.
+
+        Returns:
+            Vehicle: A reference to the vehicle associated with this backend.
+        """
+        return self._vehicle
+
+    def initialize(self, vehicle):
+        """A method that can be invoked when the simulation is starting to give access to the control backend
+        to the entire vehicle object.
+
+        Args:
+            vehicle (Vehicle): A reference to the vehicle that this sensor is associated with
+        """
+        self._vehicle = vehicle
+
     def update_sensor(self, sensor_type: str, data):
-        """Method that is used as callback for the vehicle for every iteration that a sensor produces new data. 
-        Only the IMU, GPS, Barometer and  Magnetometer sensor data are stored to be sent through mavlink. Every other 
+        """Method that is used as callback for the vehicle for every iteration that a sensor produces new data.
+        Only the IMU, GPS, Barometer and  Magnetometer sensor data are stored to be sent through mavlink. Every other
         sensor data that gets passed to this function is discarded.
 
         Args:
@@ -382,52 +407,18 @@ class PX4MavlinkBackend(Backend):
         self._sensor_data.sim_alt = int(data["altitude_gt"] * 1000)
 
     def update_bar_data(self, data):
-        """Gets called by the 'update_sensor' method to update the current Barometer data
-
-        Args:
-            data (dict): The data produced by an Barometer sensor
-        """
-
-        # Barometer data
         self._sensor_data.temperature = data["temperature"]
         self._sensor_data.abs_pressure = data["absolute_pressure"]
         self._sensor_data.pressure_alt = data["pressure_altitude"]
 
-        # Signal that we have new Barometer data
         self._sensor_data.new_bar_data = True
 
     def update_mag_data(self, data):
-        """Gets called by the 'update_sensor' method to update the current Vision data
-
-        Args:
-            data (dict): The data produced by an Vision sensor
-        """
-
-        # Magnetometer data
         self._sensor_data.xmag = data["magnetic_field"][0]
         self._sensor_data.ymag = data["magnetic_field"][1]
         self._sensor_data.zmag = data["magnetic_field"][2]
 
-        # Signal that we have new Magnetometer data
         self._sensor_data.new_mag_data = True
-
-    def update_vision_data(self, data):
-        """Method that 'in the future' will get called by the 'update_sensor' method to update the current Vision data
-        This callback is currently not being called (TODO in a future simulator version)
-        Args:
-            data (dict): The data produced by an Vision sensor
-        """
-
-        # Vision or MOCAP data
-        self._sensor_data.vision_x = data["x"]
-        self._sensor_data.vision_y = data["y"]
-        self._sensor_data.vision_z = data["z"]
-        self._sensor_data.vision_roll = data["roll"]
-        self._sensor_data.vision_pitch = data["pitch"]
-        self._sensor_data.vision_yaw = data["yaw"]
-
-        # Signal that we have new vision or mocap data
-        self._sensor_data.new_vision_data = True
 
     def update_state(self, state: State):
         """Method that is used as callback and gets called at every physics step with the current state of the vehicle.
@@ -469,13 +460,14 @@ class PX4MavlinkBackend(Backend):
         # Compute the air_speed - assumed indicated airspeed due to flow aligned with pitot (body x)
         body_vel = state.get_linear_body_velocity_ned_frd()
         self._sensor_data.sim_ind_airspeed = int(body_vel[0] * 100)
-        self._sensor_data.sim_true_airspeed = int(np.linalg.norm(lin_vel) * 100)  # TODO - add wind here
+        self._sensor_data.sim_true_airspeed = int(
+            np.linalg.norm(lin_vel) * 100
+        )  # TODO - add wind here
 
         self._sensor_data.new_sim_state = True
 
     def input_reference(self):
-        """Method that when implemented, should return a list of desired angular velocities to apply to the vehicle rotors
-        """
+        """Method that when implemented, should return a list of desired angular velocities to apply to the vehicle rotors"""
         return self._rotor_data.input_reference
 
     def __del__(self):
@@ -488,10 +480,12 @@ class PX4MavlinkBackend(Backend):
             self._connection.close()
             self._connection = None
         except:
-            carb.log_info("Mavlink connection was not closed, because it was never opened")
+            carb.log_info(
+                "Mavlink connection was not closed, because it was never opened"
+            )
 
     def start(self):
-        """Method that handles the begining of the simulation of vehicle. It will try to open the mavlink connection 
+        """Method that handles the begining of the simulation of vehicle. It will try to open the mavlink connection
         interface and also attemp to launch px4 in a background process if that option as specified in the config class
         """
 
@@ -509,7 +503,19 @@ class PX4MavlinkBackend(Backend):
         # Launch the PX4 in the background if needed
         if self.px4_autolaunch and self.px4_tool is None:
             carb.log_info("Attempting to launch PX4 in background process")
-            self.px4_tool = PX4LaunchTool(self.px4_dir, self._vehicle_id, self.px4_vehicle_model)
+
+            # Get GPS coordinates from PegasusInterface
+            pegasus_interface = PegasusInterface()
+            latitude = pegasus_interface.latitude
+            longitude = pegasus_interface.longitude
+
+            self.px4_tool = PX4LaunchTool(
+                self.px4_dir,
+                self._vehicle_id,
+                self.px4_vehicle_model,
+                latitude,
+                longitude,
+            )
             self.px4_tool.launch_px4()
 
     def stop(self):
@@ -535,13 +541,11 @@ class PX4MavlinkBackend(Backend):
             self.px4_tool = None
 
     def reset(self):
-        """For now does nothing. Here for compatibility purposes only
-        """
+        """For now does nothing. Here for compatibility purposes only"""
         return
 
     def re_initialize_interface(self):
-        """Auxiliar method used to get the MavlinkInterface to reset the MavlinkInterface to its initial state
-        """
+        """Auxiliar method used to get the MavlinkInterface to reset the MavlinkInterface to its initial state"""
 
         self._is_running = False
 
@@ -561,6 +565,51 @@ class PX4MavlinkBackend(Backend):
 
         self._last_heartbeat_sent_time = 0
 
+    def _configure_mavlink_telemetry(self):
+        """Configure PX4 to send full telemetry to port 14540 for MAVSDK"""
+        if not self.px4_tool or not self.px4_tool.px4_process:
+            carb.log_warn("Cannot configure MAVLink telemetry - PX4 not running")
+            return
+
+        try:
+            carb.log_info("🔧 Configuring MAVLink telemetry stream for MAVSDK...")
+
+            # Get the PX4 process stdin handle
+            px4_stdin = self.px4_tool.px4_process.stdin
+
+            # Check current MAVLink status
+            status_cmd = "mavlink status\n"
+            px4_stdin.write(status_cmd)
+            px4_stdin.flush()
+
+            # Brief pause to let status print
+            import time
+
+            time.sleep(0.25)
+
+            # Start MAVLink onboard instance for full telemetry to MAVSDK
+            # -u 14557: UDP receive port
+            # -o 14540: UDP output port (where MAVSDK listens)
+            # -m onboard: Full telemetry mode (includes position/velocity)
+            # -r 4000000: 4 Mbps data rate
+            mavlink_cmd = "mavlink start -u 14557 -o 14540 -m onboard -r 4000000\n"
+            carb.log_info(f"📡 Sending command: {mavlink_cmd.strip()}")
+
+            px4_stdin.write(mavlink_cmd)
+            px4_stdin.flush()
+
+            # Verify configuration
+            time.sleep(1.0)
+            px4_stdin.write(status_cmd)
+            px4_stdin.flush()
+
+            carb.log_info(
+                "✅ MAVLink telemetry configured - MAVSDK should now receive position/velocity on port 14540"
+            )
+
+        except Exception as e:
+            carb.log_error(f"Failed to configure MAVLink telemetry: {e}")
+
     def wait_for_first_hearbeat(self):
         """
         Responsible for waiting for the first hearbeat. This method is locking and will only return
@@ -569,7 +618,7 @@ class PX4MavlinkBackend(Backend):
 
         # Wait for the connection to be established
         if self._connection is None:
-            return 
+            return
 
         carb.log_warn("Waiting for first hearbeat")
         result = self._connection.wait_heartbeat(blocking=False)
@@ -577,6 +626,9 @@ class PX4MavlinkBackend(Backend):
         if result is not None:
             self._received_first_hearbeat = True
             carb.log_warn("Received first hearbeat")
+
+            # Configure MAVLink telemetry for MAVSDK after heartbeat
+            self._configure_mavlink_telemetry()
 
     def update(self, dt):
         """
@@ -602,7 +654,9 @@ class PX4MavlinkBackend(Backend):
         self.poll_mavlink_messages()
 
         # Send hearbeats at 1Hz
-        if (time.time() - self._last_heartbeat_sent_time) > 1.0 or self._received_first_hearbeat == False:
+        if (
+            time.time() - self._last_heartbeat_sent_time
+        ) > 1.0 or self._received_first_hearbeat == False:
             self.send_heartbeat()
             self._last_heartbeat_sent_time = time.time()
 
@@ -625,7 +679,9 @@ class PX4MavlinkBackend(Backend):
             return
 
         # Check if we need to lock and wait for actuator control data
-        needs_to_wait_for_actuator: bool = self._received_first_actuator and self._enable_lockstep
+        needs_to_wait_for_actuator: bool = (
+            self._received_first_actuator and self._enable_lockstep
+        )
 
         # Start by assuming that we have not received data for the actuators for the current step
         self._received_actuator = False
@@ -646,7 +702,9 @@ class PX4MavlinkBackend(Backend):
                     self._received_actuator = True
 
                     # Handle the control of the actuation commands received by PX4
-                    self.handle_control(msg.time_usec, msg.controls, msg.mode, msg.flags)
+                    self.handle_control(
+                        msg.time_usec, msg.controls, msg.mode, msg.flags
+                    )
 
             # Check if we do not need to wait for an actuator message or we just received actuator input
             # If so, break out of the infinite loop
@@ -657,15 +715,17 @@ class PX4MavlinkBackend(Backend):
         """
         Method that is used to publish an heartbear through mavlink protocol
 
-        Args: 
-            mav_type (int): The ID that indicates the type of vehicle. Defaults to MAV_TYPE_GENERIC=0 
+        Args:
+            mav_type (int): The ID that indicates the type of vehicle. Defaults to MAV_TYPE_GENERIC=0
         """
 
         # carb.log_info("Sending heartbeat")
 
         # Note: to know more about these functions, go to pymavlink->dialects->v20->standard.py
         # This contains the definitions for sending the hearbeat and simulated sensor messages
-        self._connection.mav.heartbeat_send(mav_type, mavutil.mavlink.MAV_AUTOPILOT_INVALID, 0, 0, 0)
+        self._connection.mav.heartbeat_send(
+            mav_type, mavutil.mavlink.MAV_AUTOPILOT_INVALID, 0, 0, 0
+        )
 
     def send_sensor_msgs(self, time_usec: int):
         """
@@ -755,35 +815,6 @@ class PX4MavlinkBackend(Backend):
         except:
             carb.log_warn("Could not send gps data through mavlink")
 
-    def send_vision_msgs(self, time_usec: int):
-        """
-        Method that is used to send simulated vision/mocap data through the mavlink protocol.
-
-        Args:
-            time_usec (int): The total time elapsed since the simulation started
-        """
-        carb.log_info("Sending vision/mocap msgs")
-
-        # Do not send vision/mocap data, if not new data was received
-        if not self._sensor_data.new_vision_data:
-            return
-
-        self._sensor_data.new_vision_data = False
-
-        try:
-            self._connection.mav.global_vision_position_estimate_send(
-                time_usec,
-                self._sensor_data.vision_x,
-                self._sensor_data.vision_y,
-                self._sensor_data.vision_z,
-                self._sensor_data.vision_roll,
-                self._sensor_data.vision_pitch,
-                self._sensor_data.vision_yaw,
-                self._sensor_data.vision_covariance,
-            )
-        except:
-            carb.log_warn("Could not send vision/mocap data through mavlink")
-
     def send_ground_truth(self, time_usec: int):
         """
         Method that is used to send the groundtruth data of the vehicle through mavlink
@@ -854,4 +885,3 @@ class PX4MavlinkBackend(Backend):
             data (dict): A dictionary that contains the data produced by the sensor
         """
         pass
- 

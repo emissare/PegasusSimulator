@@ -3,26 +3,37 @@
 | Author: Marcelo Jacinto (marcelo.jacinto@tecnico.ulisboa.pt)
 | License: BSD-3-Clause. Copyright (c) 2023, Marcelo Jacinto. All rights reserved.
 | Description: Implements utilitary rotations between ENU and NED inertial frame conventions and FLU and FRD body frame conventions.
+
+IMPORTANT: Isaac Sim uses FLU (Front-Left-Up), NOT ENU (East-North-Up)!
+The legacy variable names are misleading.
 """
 import numpy as np
 from scipy.spatial.transform import Rotation
 
-# Quaternion for rotation between ENU and NED INERTIAL frames
-# NED to ENU: +PI/2 rotation about Z (Down) followed by a +PI rotation around X (old North/new East)
-# ENU to NED: +PI/2 rotation about Z (Up) followed by a +PI rotation about X (old East/new North)
-# This rotation is symmetric, so q_ENU_to_NED == q_NED_to_ENU.
+# LEGACY: Quaternion for rotation between ENU and NED INERTIAL frames
+# This was originally designed for ENU→NED but Isaac actually uses FLU, not ENU!
+# Keeping for backward compatibility but should be replaced with FLU→NED
 # Note: this quaternion follows the convention [qx, qy, qz, qw]
-q_ENU_to_NED = np.array([0.70711, 0.70711, 0.0, 0.0])
+q_ENU_to_NED = np.array([0.70711, 0.70711, 0.0, 0.0])  # DEPRECATED - Isaac uses FLU not ENU
+rot_ENU_to_NED = Rotation.from_quat(q_ENU_to_NED)  # DEPRECATED - use rot_FLU_inertial_to_NED_inertial
 
-# A scipy rotation from the ENU inertial frame to the NED inertial frame of reference
-rot_ENU_to_NED = Rotation.from_quat(q_ENU_to_NED)
+# CORRECT: Transformation from Isaac Sim FLU inertial to PX4 NED inertial frame
+# Isaac FLU inertial: X=Front (we define as North), Y=Left (we define as West), Z=Up
+# PX4 NED inertial: X=North, Y=East, Z=Down
+# Transformation: X_flu→X_ned (same), Y_flu→-Y_ned (flip), Z_flu→-Z_ned (flip)
+# This is a 180° rotation around the X-axis
+q_FLU_inertial_to_NED_inertial = np.array([1.0, 0.0, 0.0, 0.0])  # 180° around X
+rot_FLU_inertial_to_NED_inertial = Rotation.from_quat(q_FLU_inertial_to_NED_inertial)
 
 # Quaternion for rotation between body FLU and body FRD frames
-# +PI rotation around X (Forward) axis rotates from Forward, Right, Down (aircraft)
-# to Forward, Left, Up (base_link) frames and vice-versa.
-# This rotation is symmetric, so q_FLU_to_FRD == q_FRD_to_FLU.
+# Isaac FLU body: X=Front, Y=Left, Z=Up
+# PX4 FRD body: X=Front, Y=Right, Z=Down
+# Transformation: X_flu→X_frd (same), Y_flu→-Y_frd (flip), Z_flu→-Z_frd (flip)
+# This is a 180° rotation around the X-axis (same as inertial transformation)
 # Note: this quaternion follows the convention [qx, qy, qz, qw]
-q_FLU_to_FRD = np.array([1.0, 0.0, 0.0, 0.0])
+q_FLU_body_to_FRD_body = np.array([1.0, 0.0, 0.0, 0.0])  # 180° around X
+rot_FLU_body_to_FRD_body = Rotation.from_quat(q_FLU_body_to_FRD_body)
 
-# A scipe rotation from the FLU body frame to the FRD body frame
-rot_FLU_to_FRD = Rotation.from_quat(q_FLU_to_FRD)
+# Keep legacy name for backward compatibility
+q_FLU_to_FRD = q_FLU_body_to_FRD_body  # DEPRECATED - use q_FLU_body_to_FRD_body
+rot_FLU_to_FRD = rot_FLU_body_to_FRD_body  # DEPRECATED - use rot_FLU_body_to_FRD_body

@@ -16,7 +16,13 @@ import omni.ui as ui
 from omni.ui import color as cl
 
 from pegasus.simulator.ui.ui_delegate import UIDelegate
-from pegasus.simulator.params import VEHICLES, SIMULATION_ENVIRONMENTS, THUMBNAIL, WORLD_THUMBNAIL, WINDOW_TITLE
+from pegasus.simulator.params import (
+    VEHICLES,
+    SIMULATION_ENVIRONMENTS,
+    THUMBNAIL,
+    WORLD_THUMBNAIL,
+    WINDOW_TITLE,
+)
 
 
 class WidgetWindow(ui.Window):
@@ -58,7 +64,11 @@ class WidgetWindow(ui.Window):
 
         # Setup the base widget window
         super().__init__(
-            WINDOW_TITLE, width=WidgetWindow.WINDOW_WIDTH, height=WidgetWindow.WINDOW_HEIGHT, visible=True, **kwargs
+            WINDOW_TITLE,
+            width=WidgetWindow.WINDOW_WIDTH,
+            height=WidgetWindow.WINDOW_HEIGHT,
+            visible=True,
+            **kwargs,
         )
         self.deferred_dock_in("Property", ui.DockPolicy.CURRENT_WINDOW_IS_ACTIVE)
 
@@ -140,15 +150,21 @@ class WidgetWindow(ui.Window):
 
         # Define the UI of the widget window
         with self.frame:
-        
-            with ui.ScrollingFrame(horizontal_scrollbar_policy=ui.ScrollBarPolicy.SCROLLBAR_ALWAYS_ON, vertical_scrollbar_policy=ui.ScrollBarPolicy.SCROLLBAR_ALWAYS_ON):
+
+            with ui.ScrollingFrame(
+                horizontal_scrollbar_policy=ui.ScrollBarPolicy.SCROLLBAR_ALWAYS_ON,
+                vertical_scrollbar_policy=ui.ScrollBarPolicy.SCROLLBAR_ALWAYS_ON,
+            ):
 
                 # Vertical Stack of menus
                 with ui.VStack():
                     # Add build number for debugging
                     with ui.HStack(height=20):
                         ui.Spacer()
-                        ui.Label("Build: 2025.09.21-v20", style={"color": 0x808080FF, "font_size": 12})
+                        ui.Label(
+                            "Build: 2025.09.21-v28",
+                            style={"color": 0x808080FF, "font_size": 12},
+                        )
                         ui.Spacer()
                     ui.Spacer(height=5)
 
@@ -188,12 +204,16 @@ class WidgetWindow(ui.Window):
 
                 # Iterate over all existing pre-made worlds bundled with this extension
                 with ui.HStack():
-                    ui.Label("World Assets", width=WidgetWindow.LABEL_PADDING, height=10.0)
+                    ui.Label(
+                        "World Assets", width=WidgetWindow.LABEL_PADDING, height=10.0
+                    )
 
                     # Combo box with the available environments to select from
                     dropdown_menu = ui.ComboBox(0, height=10, name="environments")
                     for environment in SIMULATION_ENVIRONMENTS:
-                        dropdown_menu.model.append_child_item(None, ui.SimpleStringModel(environment))
+                        dropdown_menu.model.append_child_item(
+                            None, ui.SimpleStringModel(environment)
+                        )
 
                     # Allow the delegate to know which option was selected in the dropdown menu
                     self._delegate.set_scene_dropdown(dropdown_menu.model)
@@ -206,36 +226,83 @@ class WidgetWindow(ui.Window):
                         with ui.HStack():
 
                             # Latitude
-                            ui.Label("Latitude", name="label", width=WidgetWindow.LABEL_PADDING-50)
+                            ui.Label(
+                                "Latitude",
+                                name="label",
+                                width=WidgetWindow.LABEL_PADDING - 50,
+                            )
                             latitude_field = ui.FloatField(name="latitude", precision=6)
                             latitude_field.model.set_value(self._delegate._latitude)
                             self._delegate.set_latitude_field(latitude_field.model)
-                            ui.Circle(name="transform", width=20, height=20, radius=3.5, size_policy=ui.CircleSizePolicy.FIXED)
+                            ui.Circle(
+                                name="transform",
+                                width=20,
+                                height=20,
+                                radius=3.5,
+                                size_policy=ui.CircleSizePolicy.FIXED,
+                            )
 
                             # Longitude
-                            ui.Label("Longitude", name="label", width=WidgetWindow.LABEL_PADDING-50)
-                            longitude_field = ui.FloatField(name="longitude", precision=6)
+                            ui.Label(
+                                "Longitude",
+                                name="label",
+                                width=WidgetWindow.LABEL_PADDING - 50,
+                            )
+                            longitude_field = ui.FloatField(
+                                name="longitude", precision=6
+                            )
                             longitude_field.model.set_value(self._delegate._longitude)
                             self._delegate.set_longitude_field(longitude_field.model)
-                            ui.Circle(name="transform", width=20, height=20, radius=3.5, size_policy=ui.CircleSizePolicy.FIXED)
+                            ui.Circle(
+                                name="transform",
+                                width=20,
+                                height=20,
+                                radius=3.5,
+                                size_policy=ui.CircleSizePolicy.FIXED,
+                            )
 
                             # Altitude
-                            ui.Label("Altitude", name="label", width=WidgetWindow.LABEL_PADDING-50)
+                            ui.Label(
+                                "Altitude",
+                                name="label",
+                                width=WidgetWindow.LABEL_PADDING - 50,
+                            )
                             altitude_field = ui.FloatField(name="altitude", precision=6)
                             altitude_field.model.set_value(self._delegate._altitude)
                             self._delegate.set_altitude_field(altitude_field.model)
-                            ui.Circle(name="transform", width=20, height=20, radius=3.5, size_policy=ui.CircleSizePolicy.FIXED)
+                            ui.Circle(
+                                name="transform",
+                                width=20,
+                                height=20,
+                                radius=3.5,
+                                size_policy=ui.CircleSizePolicy.FIXED,
+                            )
 
                         with ui.HStack():
-                            ui.Button("Set", enabled=True, clicked_fn=self._delegate.on_set_new_global_coordinates)
-                            ui.Button("Reset", enabled=True, clicked_fn=self._delegate.on_reset_global_coordinates)
-                            ui.Button("Make Default", enabled=True, clicked_fn=self._delegate.on_set_new_default_global_coordinates)
+                            ui.Button(
+                                "Set",
+                                enabled=True,
+                                clicked_fn=self._delegate.on_set_new_global_coordinates,
+                            )
+                            ui.Button(
+                                "Reset",
+                                enabled=True,
+                                clicked_fn=self._delegate.on_reset_global_coordinates,
+                            )
+                            ui.Button(
+                                "Make Default",
+                                enabled=True,
+                                clicked_fn=self._delegate.on_set_new_default_global_coordinates,
+                            )
 
                 ui.Spacer(height=0)
 
                 with ui.HStack():
                     # Add a thumbnail image to have a preview of the world that is about to be loaded
-                    with ui.ZStack(width=WidgetWindow.LABEL_PADDING, height=WidgetWindow.BUTTON_HEIGHT * 2):
+                    with ui.ZStack(
+                        width=WidgetWindow.LABEL_PADDING,
+                        height=WidgetWindow.BUTTON_HEIGHT * 2,
+                    ):
                         ui.Rectangle()
                         ui.Image(
                             WORLD_THUMBNAIL,
@@ -276,7 +343,10 @@ class WidgetWindow(ui.Window):
             with ui.VStack(height=0, spacing=10, name="frame_v_stack"):
                 with ui.HStack():
                     # Add a thumbnail image to have a preview of the world that is about to be loaded
-                    with ui.ZStack(width=WidgetWindow.LABEL_PADDING, height=WidgetWindow.BUTTON_HEIGHT * 2):
+                    with ui.ZStack(
+                        width=WidgetWindow.LABEL_PADDING,
+                        height=WidgetWindow.BUTTON_HEIGHT * 2,
+                    ):
                         ui.Rectangle()
                         ui.Image(
                             THUMBNAIL,
@@ -284,30 +354,47 @@ class WidgetWindow(ui.Window):
                             alignment=ui.Alignment.CENTER,
                         )
                     ui.Spacer(width=10)
-                    
+
                     with ui.VStack():
                         with ui.HStack():
                             # Iterate over all existing robots in the extension
-                            ui.Label("Vehicle Model", name="label", width=WidgetWindow.LABEL_PADDING, alignment=ui.Alignment.TOP)
+                            ui.Label(
+                                "Vehicle Model",
+                                name="label",
+                                width=WidgetWindow.LABEL_PADDING,
+                                alignment=ui.Alignment.TOP,
+                            )
 
                             # Combo box with the available vehicles to select from
                             dropdown_menu = ui.ComboBox(0, name="vehicles")
                             for vehicle in VEHICLES:
-                                dropdown_menu.model.append_child_item(None, ui.SimpleStringModel(vehicle))
+                                dropdown_menu.model.append_child_item(
+                                    None, ui.SimpleStringModel(vehicle)
+                                )
                             self._delegate.set_vehicle_dropdown(dropdown_menu.model)
 
                             # Store reference to the dropdown for refreshing
                             self._vehicle_dropdown_menu = dropdown_menu
 
                             # Add refresh button
-                            ui.Button("↻", width=25, height=25, clicked_fn=self._refresh_vehicles, tooltip="Refresh vehicle list")
+                            ui.Button(
+                                "↻",
+                                width=25,
+                                height=25,
+                                clicked_fn=self._refresh_vehicles,
+                                tooltip="Refresh vehicle list",
+                            )
 
                         with ui.HStack():
-                            ui.Label("Vehicle ID", name="label", width=WidgetWindow.LABEL_PADDING, alignment=ui.Alignment.TOP)
+                            ui.Label(
+                                "Vehicle ID",
+                                name="label",
+                                width=WidgetWindow.LABEL_PADDING,
+                                alignment=ui.Alignment.TOP,
+                            )
                             vehicle_id_field = ui.IntField()
                             self._delegate.set_vehicle_id_field(vehicle_id_field.model)
 
-                
                 # Buttons to load and save the vehicle
                 with ui.HStack():
                     ui.Button(
@@ -331,22 +418,40 @@ class WidgetWindow(ui.Window):
             with ui.VStack(height=0, spacing=10, name="frame_v_stack"):
                 ui.Spacer(height=WidgetWindow.GENERAL_SPACING)
                 with ui.HStack():
-                    ui.Label("Auto-launch PX4", name="label", width=WidgetWindow.LABEL_PADDING - 20)
+                    ui.Label(
+                        "Auto-launch PX4",
+                        name="label",
+                        width=WidgetWindow.LABEL_PADDING - 20,
+                    )
                     px4_checkbox = ui.CheckBox()
                     px4_checkbox.model.set_value(self._delegate._autostart_px4)
                     self._delegate.set_px4_autostart_checkbox(px4_checkbox.model)
 
                 with ui.HStack():
-                    ui.Label("PX4 Path", name="label", width=WidgetWindow.LABEL_PADDING - 20)
+                    ui.Label(
+                        "PX4 Path", name="label", width=WidgetWindow.LABEL_PADDING - 20
+                    )
                     px4_path_field = ui.StringField(name="px4_path", width=300)
                     px4_path_field.model.set_value(self._delegate._px4_dir)
                     self._delegate.set_px4_directory_field(px4_path_field.model)
 
-                    ui.Button("Reset", enabled=True, clicked_fn=self._delegate.on_reset_px4_path)
-                    ui.Button("Make Default", enabled=True, clicked_fn=self._delegate.on_set_new_default_px4_path)
+                    ui.Button(
+                        "Reset",
+                        enabled=True,
+                        clicked_fn=self._delegate.on_reset_px4_path,
+                    )
+                    ui.Button(
+                        "Make Default",
+                        enabled=True,
+                        clicked_fn=self._delegate.on_set_new_default_px4_path,
+                    )
 
                 with ui.HStack():
-                    ui.Label("PX4 airframe", name="label", width=WidgetWindow.LABEL_PADDING - 20)
+                    ui.Label(
+                        "PX4 airframe",
+                        name="label",
+                        width=WidgetWindow.LABEL_PADDING - 20,
+                    )
                     px4_airframe_field = ui.StringField(name="px4_model")
                     px4_airframe_field.model.set_value(self._delegate._px4_airframe)
                     self._delegate.set_px4_airframe_field(px4_airframe_field.model)
@@ -384,13 +489,24 @@ class WidgetWindow(ui.Window):
                                         "corner_flag": ui.CornerFlag.LEFT,
                                     },
                                 )
-                                ui.Label(axis, height=20, name="transform_label", alignment=ui.Alignment.CENTER)
-                            float_drag = ui.FloatDrag(name="transform", min=-1000000, max=1000000, step=0.01)
+                                ui.Label(
+                                    axis,
+                                    height=20,
+                                    name="transform_label",
+                                    alignment=ui.Alignment.CENTER,
+                                )
+                            float_drag = ui.FloatDrag(
+                                name="transform", min=-1000000, max=1000000, step=0.01
+                            )
                             float_drag.model.set_value(default_value)
                             # Save the model of each FloatDrag such that we can access its values later on
                             self._camera_transform_models.append(float_drag.model)
                             ui.Circle(
-                                name="transform", width=20, height=20, radius=3.5, size_policy=ui.CircleSizePolicy.FIXED
+                                name="transform",
+                                width=20,
+                                height=20,
+                                radius=3.5,
+                                size_policy=ui.CircleSizePolicy.FIXED,
                             )
 
                 # Iterate over the position and rotation menus
@@ -411,13 +527,24 @@ class WidgetWindow(ui.Window):
                                         "corner_flag": ui.CornerFlag.LEFT,
                                     },
                                 )
-                                ui.Label(axis, height=20, name="transform_label", alignment=ui.Alignment.CENTER)
-                            float_drag = ui.FloatDrag(name="transform", min=-1000000, max=1000000, step=0.01)
+                                ui.Label(
+                                    axis,
+                                    height=20,
+                                    name="transform_label",
+                                    alignment=ui.Alignment.CENTER,
+                                )
+                            float_drag = ui.FloatDrag(
+                                name="transform", min=-1000000, max=1000000, step=0.01
+                            )
                             float_drag.model.set_value(default_value)
                             # Save the model of each FloatDrag such that we can access its values later on
                             self._camera_transform_models.append(float_drag.model)
                             ui.Circle(
-                                name="transform", width=20, height=20, radius=3.5, size_policy=ui.CircleSizePolicy.FIXED
+                                name="transform",
+                                width=20,
+                                height=20,
+                                radius=3.5,
+                                size_policy=ui.CircleSizePolicy.FIXED,
                             )
 
                 # Button to set the camera view
@@ -428,7 +555,6 @@ class WidgetWindow(ui.Window):
                     style=WidgetWindow.BUTTON_BASE_STYLE,
                 )
                 ui.Spacer()
-
 
     # ------------------------------------------------------------------------------------------------
     # TODO - optimize the reading of values from the transform widget. This could be one function only
@@ -450,8 +576,18 @@ class WidgetWindow(ui.Window):
 
         # Extract the camera desired position and the target it is pointing to
         if len(self._camera_transform_models) == 6:
-            camera_pos = np.array([self._camera_transform_models[i].get_value_as_float() for i in range(3)])
-            camera_target = np.array([self._camera_transform_models[i].get_value_as_float() for i in range(3, 6)])
+            camera_pos = np.array(
+                [
+                    self._camera_transform_models[i].get_value_as_float()
+                    for i in range(3)
+                ]
+            )
+            camera_target = np.array(
+                [
+                    self._camera_transform_models[i].get_value_as_float()
+                    for i in range(3, 6)
+                ]
+            )
             return camera_pos, camera_target
 
         return None, None
@@ -471,7 +607,9 @@ class WidgetWindow(ui.Window):
 
         # Repopulate with new items
         for vehicle in updated_vehicles:
-            self._vehicle_dropdown_menu.model.append_child_item(None, ui.SimpleStringModel(vehicle))
+            self._vehicle_dropdown_menu.model.append_child_item(
+                None, ui.SimpleStringModel(vehicle)
+            )
 
         # Update the delegate's vehicles names list
         self._delegate._vehicles_names = list(updated_vehicles.keys())
@@ -493,7 +631,9 @@ class WidgetWindow(ui.Window):
                     self._gimbal_enabled_checkbox = ui.CheckBox(width=20)
                     self._ui_subscriptions.append(
                         self._gimbal_enabled_checkbox.model.subscribe_value_changed_fn(
-                            lambda m: self._delegate.on_gimbal_enabled_changed(m.get_value_as_bool())
+                            lambda m: self._delegate.on_gimbal_enabled_changed(
+                                m.get_value_as_bool()
+                            )
                         )
                     )
 
@@ -503,8 +643,7 @@ class WidgetWindow(ui.Window):
                 with ui.HStack():
                     ui.Label("Pitch", width=80)
                     self._gimbal_pitch_slider = ui.FloatSlider(
-                        min=-135.0, max=45.0, default=-90.0,
-                        width=150, height=20
+                        min=-135.0, max=45.0, default=-90.0, width=150, height=20
                     )
                     self._gimbal_pitch_value = ui.FloatField(width=60, height=20)
                     self._gimbal_pitch_value.model.set_value(-90.0)
@@ -513,8 +652,12 @@ class WidgetWindow(ui.Window):
                 self._ui_subscriptions.append(
                     self._gimbal_pitch_slider.model.subscribe_value_changed_fn(
                         lambda m: [
-                            self._gimbal_pitch_value.model.set_value(m.get_value_as_float()),
-                            self._delegate.on_gimbal_pitch_changed(m.get_value_as_float())
+                            self._gimbal_pitch_value.model.set_value(
+                                m.get_value_as_float()
+                            ),
+                            self._delegate.on_gimbal_pitch_changed(
+                                m.get_value_as_float()
+                            ),
                         ]
                     )
                 )
@@ -522,8 +665,12 @@ class WidgetWindow(ui.Window):
                 self._ui_subscriptions.append(
                     self._gimbal_pitch_value.model.subscribe_value_changed_fn(
                         lambda m: [
-                            self._gimbal_pitch_slider.model.set_value(m.get_value_as_float()),
-                            self._delegate.on_gimbal_pitch_changed(m.get_value_as_float())
+                            self._gimbal_pitch_slider.model.set_value(
+                                m.get_value_as_float()
+                            ),
+                            self._delegate.on_gimbal_pitch_changed(
+                                m.get_value_as_float()
+                            ),
                         ]
                     )
                 )
@@ -532,8 +679,7 @@ class WidgetWindow(ui.Window):
                 with ui.HStack():
                     ui.Label("Roll", width=80)
                     self._gimbal_roll_slider = ui.FloatSlider(
-                        min=-45.0, max=45.0, default=0.0,
-                        width=150, height=20
+                        min=-45.0, max=45.0, default=0.0, width=150, height=20
                     )
                     self._gimbal_roll_value = ui.FloatField(width=60, height=20)
                     self._gimbal_roll_value.model.set_value(0.0)
@@ -542,8 +688,12 @@ class WidgetWindow(ui.Window):
                 self._ui_subscriptions.append(
                     self._gimbal_roll_slider.model.subscribe_value_changed_fn(
                         lambda m: [
-                            self._gimbal_roll_value.model.set_value(m.get_value_as_float()),
-                            self._delegate.on_gimbal_roll_changed(m.get_value_as_float())
+                            self._gimbal_roll_value.model.set_value(
+                                m.get_value_as_float()
+                            ),
+                            self._delegate.on_gimbal_roll_changed(
+                                m.get_value_as_float()
+                            ),
                         ]
                     )
                 )
@@ -551,8 +701,12 @@ class WidgetWindow(ui.Window):
                 self._ui_subscriptions.append(
                     self._gimbal_roll_value.model.subscribe_value_changed_fn(
                         lambda m: [
-                            self._gimbal_roll_slider.model.set_value(m.get_value_as_float()),
-                            self._delegate.on_gimbal_roll_changed(m.get_value_as_float())
+                            self._gimbal_roll_slider.model.set_value(
+                                m.get_value_as_float()
+                            ),
+                            self._delegate.on_gimbal_roll_changed(
+                                m.get_value_as_float()
+                            ),
                         ]
                     )
                 )
@@ -561,8 +715,7 @@ class WidgetWindow(ui.Window):
                 with ui.HStack():
                     ui.Label("Yaw", width=80)
                     self._gimbal_yaw_slider = ui.FloatSlider(
-                        min=-180.0, max=180.0, default=0.0,
-                        width=150, height=20
+                        min=-180.0, max=180.0, default=0.0, width=150, height=20
                     )
                     self._gimbal_yaw_value = ui.FloatField(width=60, height=20)
                     self._gimbal_yaw_value.model.set_value(0.0)
@@ -571,8 +724,12 @@ class WidgetWindow(ui.Window):
                 self._ui_subscriptions.append(
                     self._gimbal_yaw_slider.model.subscribe_value_changed_fn(
                         lambda m: [
-                            self._gimbal_yaw_value.model.set_value(m.get_value_as_float()),
-                            self._delegate.on_gimbal_yaw_changed(m.get_value_as_float())
+                            self._gimbal_yaw_value.model.set_value(
+                                m.get_value_as_float()
+                            ),
+                            self._delegate.on_gimbal_yaw_changed(
+                                m.get_value_as_float()
+                            ),
                         ]
                     )
                 )
@@ -580,8 +737,12 @@ class WidgetWindow(ui.Window):
                 self._ui_subscriptions.append(
                     self._gimbal_yaw_value.model.subscribe_value_changed_fn(
                         lambda m: [
-                            self._gimbal_yaw_slider.model.set_value(m.get_value_as_float()),
-                            self._delegate.on_gimbal_yaw_changed(m.get_value_as_float())
+                            self._gimbal_yaw_slider.model.set_value(
+                                m.get_value_as_float()
+                            ),
+                            self._delegate.on_gimbal_yaw_changed(
+                                m.get_value_as_float()
+                            ),
                         ]
                     )
                 )
@@ -594,7 +755,7 @@ class WidgetWindow(ui.Window):
                         "Point Down",
                         clicked_fn=self._on_gimbal_point_down_clicked,
                         height=WidgetWindow.BUTTON_HEIGHT // 2,
-                        style=WidgetWindow.BUTTON_BASE_STYLE
+                        style=WidgetWindow.BUTTON_BASE_STYLE,
                     )
                     self._gimbal_buttons.append(button1)
 
@@ -602,7 +763,7 @@ class WidgetWindow(ui.Window):
                         "Point Forward",
                         clicked_fn=self._on_gimbal_center_clicked,
                         height=WidgetWindow.BUTTON_HEIGHT // 2,
-                        style=WidgetWindow.BUTTON_BASE_STYLE
+                        style=WidgetWindow.BUTTON_BASE_STYLE,
                     )
                     self._gimbal_buttons.append(button2)
 
@@ -611,7 +772,7 @@ class WidgetWindow(ui.Window):
                         "Stabilize Mode",
                         clicked_fn=self._on_gimbal_stabilize_clicked,
                         height=WidgetWindow.BUTTON_HEIGHT // 2,
-                        style=WidgetWindow.BUTTON_BASE_STYLE
+                        style=WidgetWindow.BUTTON_BASE_STYLE,
                     )
                     self._gimbal_buttons.append(button3)
 
@@ -619,7 +780,7 @@ class WidgetWindow(ui.Window):
                         "Manual Mode",
                         clicked_fn=self._on_gimbal_manual_clicked,
                         height=WidgetWindow.BUTTON_HEIGHT // 2,
-                        style=WidgetWindow.BUTTON_BASE_STYLE
+                        style=WidgetWindow.BUTTON_BASE_STYLE,
                     )
                     self._gimbal_buttons.append(button4)
 
@@ -675,16 +836,20 @@ class WidgetWindow(ui.Window):
                     self._motor_control_enabled_checkbox = ui.CheckBox(width=20)
                     self._ui_subscriptions.append(
                         self._motor_control_enabled_checkbox.model.subscribe_value_changed_fn(
-                            lambda m: self._delegate.on_manual_motor_enabled_changed(m.get_value_as_bool())
+                            lambda m: self._delegate.on_manual_motor_enabled_changed(
+                                m.get_value_as_bool()
+                            )
                         )
                     )
 
                 # Warning label (initially hidden)
                 with ui.HStack():
                     ui.Spacer()
-                    ui.Label("⚠️  WARNING: Overrides PX4 Commands",
-                            style={"color": 0xFF4444FF, "font_size": 12},
-                            alignment=ui.Alignment.CENTER)
+                    ui.Label(
+                        "⚠️  WARNING: Overrides PX4 Commands",
+                        style={"color": 0xFF4444FF, "font_size": 12},
+                        alignment=ui.Alignment.CENTER,
+                    )
                     ui.Spacer()
 
                 ui.Spacer(height=5)
@@ -693,12 +858,19 @@ class WidgetWindow(ui.Window):
                 self._motor_sliders = []
                 self._motor_values = []
 
+                # Motor position labels for clarity (PX4 X-configuration)
+                motor_labels = [
+                    "M0 (FR)",  # Motor 0: Front-Right
+                    "M1 (RL)",  # Motor 1: Rear-Left
+                    "M2 (FL)",  # Motor 2: Front-Left
+                    "M3 (RR)",  # Motor 3: Rear-Right
+                ]
+
                 for i in range(4):
                     with ui.HStack():
-                        ui.Label(f"Motor {i+1}", width=60)
+                        ui.Label(motor_labels[i], width=60)
                         slider = ui.FloatSlider(
-                            min=0.0, max=100.0, default=0.0,
-                            width=120, height=20
+                            min=0.0, max=100.0, default=0.0, width=120, height=20
                         )
                         value = ui.FloatField(width=50, height=20)
                         value.model.set_value(0.0)
@@ -712,8 +884,12 @@ class WidgetWindow(ui.Window):
                         self._ui_subscriptions.append(
                             slider.model.subscribe_value_changed_fn(
                                 lambda m, motor_idx=i: [
-                                    self._motor_values[motor_idx].model.set_value(m.get_value_as_float()),
-                                    self._delegate.on_motor_speed_changed(motor_idx, m.get_value_as_float())
+                                    self._motor_values[motor_idx].model.set_value(
+                                        m.get_value_as_float()
+                                    ),
+                                    self._delegate.on_motor_speed_changed(
+                                        motor_idx, m.get_value_as_float()
+                                    ),
                                 ]
                             )
                         )
@@ -721,8 +897,12 @@ class WidgetWindow(ui.Window):
                         self._ui_subscriptions.append(
                             value.model.subscribe_value_changed_fn(
                                 lambda m, motor_idx=i: [
-                                    self._motor_sliders[motor_idx].model.set_value(m.get_value_as_float()),
-                                    self._delegate.on_motor_speed_changed(motor_idx, m.get_value_as_float())
+                                    self._motor_sliders[motor_idx].model.set_value(
+                                        m.get_value_as_float()
+                                    ),
+                                    self._delegate.on_motor_speed_changed(
+                                        motor_idx, m.get_value_as_float()
+                                    ),
                                 ]
                             )
                         )
@@ -733,8 +913,7 @@ class WidgetWindow(ui.Window):
                 with ui.HStack():
                     ui.Label("Master", width=60)
                     self._master_throttle_slider = ui.FloatSlider(
-                        min=0.0, max=100.0, default=0.0,
-                        width=120, height=20
+                        min=0.0, max=100.0, default=0.0, width=120, height=20
                     )
                     self._master_throttle_value = ui.FloatField(width=50, height=20)
                     self._master_throttle_value.model.set_value(0.0)
@@ -744,8 +923,12 @@ class WidgetWindow(ui.Window):
                 self._ui_subscriptions.append(
                     self._master_throttle_slider.model.subscribe_value_changed_fn(
                         lambda m: [
-                            self._master_throttle_value.model.set_value(m.get_value_as_float()),
-                            self._delegate.on_master_throttle_changed(m.get_value_as_float())
+                            self._master_throttle_value.model.set_value(
+                                m.get_value_as_float()
+                            ),
+                            self._delegate.on_master_throttle_changed(
+                                m.get_value_as_float()
+                            ),
                         ]
                     )
                 )
@@ -753,8 +936,12 @@ class WidgetWindow(ui.Window):
                 self._ui_subscriptions.append(
                     self._master_throttle_value.model.subscribe_value_changed_fn(
                         lambda m: [
-                            self._master_throttle_slider.model.set_value(m.get_value_as_float()),
-                            self._delegate.on_master_throttle_changed(m.get_value_as_float())
+                            self._master_throttle_slider.model.set_value(
+                                m.get_value_as_float()
+                            ),
+                            self._delegate.on_master_throttle_changed(
+                                m.get_value_as_float()
+                            ),
                         ]
                     )
                 )

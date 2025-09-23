@@ -23,7 +23,7 @@ from pegasus.simulator.params import VEHICLES, SIMULATION_ENVIRONMENTS, WORLD_SE
 from pegasus.simulator.logic.interface.pegasus_interface import PegasusInterface
 
 # Vehicle Manager to spawn Vehicles
-from pegasus.simulator.logic.backends import PX4MavlinkBackend, PX4MavlinkBackendConfig
+from pegasus.simulator.logic import PX4Backend, PX4BackendConfig
 from pegasus.simulator.logic.vehicles.multirotor import Multirotor
 from pegasus.simulator.logic.vehicle_manager import VehicleManager
 
@@ -567,10 +567,8 @@ class UIDelegate:
         try:
             # Find PX4 backend
             px4_backend = None
-            for backend in vehicle._backends:
-                if isinstance(backend, PX4MavlinkBackend):
-                    px4_backend = backend
-                    break
+            if vehicle._backend and isinstance(vehicle._backend, PX4Backend):
+                px4_backend = vehicle._backend
 
             if px4_backend is None:
                 carb.log_warn("No PX4 MAVLink backend found for gimbal control")

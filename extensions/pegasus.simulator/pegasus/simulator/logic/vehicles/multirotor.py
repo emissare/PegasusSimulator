@@ -20,11 +20,13 @@ from pxr import UsdGeom, UsdPhysics, Gf
 from pegasus.simulator.logic.vehicles.vehicle import Vehicle
 
 # Mavlink interface
-from pegasus.simulator.logic.backends.px4_mavlink_backend import PX4MavlinkBackend, PX4MavlinkBackendConfig
+from pegasus.simulator.logic.px4_backend import (
+    PX4Backend,
+    PX4BackendConfig,
+)
 
 # Sensors and dynamics setup
 from pegasus.simulator.logic.dynamics import LinearDrag
-from pegasus.simulator.logic.thrusters import QuadraticThrustCurve
 from pegasus.simulator.logic.sensors import Barometer, IMU, Magnetometer, GPS
 
 
@@ -67,36 +69,41 @@ class Multirotor(Vehicle):
 
         # Validate config file parameter
         if not config_file:
-            raise ValueError("config_file parameter is required - must specify path to YAML vehicle configuration")
+            raise ValueError(
+                "config_file parameter is required - must specify path to YAML vehicle configuration"
+            )
 
         # Load vehicle configuration from YAML
         config_path = Path(config_file)
         if not config_path.exists():
             raise FileNotFoundError(f"Vehicle config file not found: {config_file}")
 
-        with open(config_path, 'r') as f:
+        with open(config_path, "r") as f:
             self.vehicle_config = yaml.safe_load(f)
 
         # Load motor database using path utilities
-        from pegasus.simulator.utils.paths import get_motor_db_path, ensure_config_file_exists
+        from pegasus.simulator.utils.paths import (
+            get_motor_db_path,
+            ensure_config_file_exists,
+        )
 
         motor_db_path = ensure_config_file_exists(get_motor_db_path(), "motor database")
-        with open(motor_db_path, 'r') as f:
+        with open(motor_db_path, "r") as f:
             motor_database = yaml.safe_load(f)
 
         # Get motor parameters
-        motor_name = self.vehicle_config['vehicle']['motor']
-        if motor_name not in motor_database['motors']:
+        motor_name = self.vehicle_config["vehicle"]["motor"]
+        if motor_name not in motor_database["motors"]:
             raise ValueError(f"Motor '{motor_name}' not found in motor database")
-        self.motor_params = motor_database['motors'][motor_name]
+        self.motor_params = motor_database["motors"][motor_name]
 
         # Extract vehicle parameters
-        self.vehicle_type = self.vehicle_config['vehicle']['type']
-        self.rotor_separation = self.vehicle_config['vehicle']['rotor_separation']
-        self.vehicle_mass = self.vehicle_config['vehicle']['mass']
+        self.vehicle_type = self.vehicle_config["vehicle"]["type"]
+        self.rotor_separation = self.vehicle_config["vehicle"]["rotor_separation"]
+        self.vehicle_mass = self.vehicle_config["vehicle"]["mass"]
 
-        # Setup sensors, thrusters, and backends first
-        sensors, graphical_sensors, graphs, backends = self._setup_vehicle_components()
+        # Setup sensors and backend first
+        sensors, graphical_sensors, graphs, backend = self._setup_vehicle_components()
 
         # Initialize parent Vehicle class WITHOUT USD file (empty string)
         super().__init__(
@@ -107,7 +114,7 @@ class Multirotor(Vehicle):
             sensors,
             graphical_sensors,
             graphs,
-            backends
+            backend,
         )
 
         # Manual motor control attributes
@@ -138,23 +145,43 @@ class Multirotor(Vehicle):
         Matches the current Iris motor rotation pattern.
         """
 
-        # Standard X configuration rotor positions (above body)
+        # PX4 X configuration rotor positions (above body) - Isaac Sim coords: +X forward, +Y left, +Z up
         separation = self.rotor_separation
         rotor_height = 0.1  # 10cm above body
         rotor_positions = [
-            [separation/2, separation/2, rotor_height],    # Front-right
-            [-separation/2, separation/2, rotor_height],   # Front-left
-            [-separation/2, -separation/2, rotor_height],  # Rear-left
-            [separation/2, -separation/2, rotor_height]    # Rear-right
+            [
+                separation / 2,
+                -separation / 2,
+                rotor_height,
+            ],  # Motor 0: Front-right (+X, -Y)
+            [
+                -separation / 2,
+                separation / 2,
+                rotor_height,
+            ],  # Motor 1: Rear-left (-X, +Y)
+            [
+                separation / 2,
+                separation / 2,
+                rotor_height,
+            ],  # Motor 2: Front-left (+X, +Y)
+            [
+                -separation / 2,
+                -separation / 2,
+                rotor_height,
+            ],  # Motor 3: Rear-right (-X, -Y)
         ]
 
         # Standard rotation directions (matching current Iris: [-1, -1, 1, 1])
         rotor_directions = [-1, -1, 1, 1]  # CCW, CCW, CW, CW
 
         # Build the multirotor structure
-        self._build_multirotor_structure(stage_prefix, rotor_positions, rotor_directions)
+        self._build_multirotor_structure(
+            stage_prefix, rotor_positions, rotor_directions
+        )
 
-    def _build_multirotor_structure(self, stage_prefix: str, rotor_positions: list, rotor_directions: list):
+    def _build_multirotor_structure(
+        self, stage_prefix: str, rotor_positions: list, rotor_directions: list
+    ):
         """
         Build the physical multirotor structure with body and rotors.
         """
@@ -167,7 +194,7 @@ class Multirotor(Vehicle):
             self._create_rotor(stage_prefix, i, pos, direction)
 
         # Create gimbal mount if enabled
-        if self.vehicle_config['vehicle'].get('gimbal', {}).get('enabled', False):
+        if self.vehicle_config["vehicle"].get("gimbal", {}).get("enabled", False):
             self._create_gimbal_mount(stage_prefix)
 
         # Setup articulation root after all structure is created
@@ -180,12 +207,13 @@ class Multirotor(Vehicle):
         Only the mesh has physics - this prevents nested rigid body errors.
         """
 
-        body_config = self.vehicle_config['vehicle']['body']
-        dimensions = body_config['dimensions']
-        color = body_config['color']
+        body_config = self.vehicle_config["vehicle"]["body"]
+        dimensions = body_config["dimensions"]
+        color = body_config["color"]
 
         # Get USD stage for creating geometry
         from omni.usd import get_context
+
         stage = get_context().get_stage()
 
         # Create body Xform container (no physics)
@@ -206,9 +234,11 @@ class Multirotor(Vehicle):
         body_geom.AddScaleOp().Set(Gf.Vec3d(scale_x, scale_y, scale_z))
 
         # Apply color (using USD material - simplified approach)
-        if hasattr(body_geom, 'CreateDisplayColorAttr'):
+        if hasattr(body_geom, "CreateDisplayColorAttr"):
             normalized_color = [c / 255.0 for c in color]  # Convert to 0-1 range
-            body_geom.CreateDisplayColorAttr([(normalized_color[0], normalized_color[1], normalized_color[2])])
+            body_geom.CreateDisplayColorAttr(
+                [(normalized_color[0], normalized_color[1], normalized_color[2])]
+            )
 
         # Apply physics ONLY to the mesh (the ONE rigid body)
         body_prim = stage.GetPrimAtPath(body_mesh_path)
@@ -219,17 +249,35 @@ class Multirotor(Vehicle):
         mass_api = UsdPhysics.MassAPI.Apply(body_prim)
         mass_api.CreateMassAttr(self.vehicle_mass)
 
-    def _create_rotor(self, stage_prefix: str, rotor_index: int, position: list, direction: int):
+        # Set inertia matrix if specified in configuration
+        inertia_config = self.vehicle_config["vehicle"].get("inertia", {})
+        if inertia_config:
+            # Create diagonal inertia tensor from configuration
+            diagonal_inertia = Gf.Vec3f(
+                inertia_config.get("ixx", 0.029125),
+                inertia_config.get("iyy", 0.029125),
+                inertia_config.get("izz", 0.055225),
+            )
+            mass_api.CreateDiagonalInertiaAttr(diagonal_inertia)
+
+            # Set center of mass if needed (default to origin)
+            center_of_mass = Gf.Vec3f(0.0, 0.0, 0.0)
+            mass_api.CreateCenterOfMassAttr(center_of_mass)
+
+    def _create_rotor(
+        self, stage_prefix: str, rotor_index: int, position: list, direction: int
+    ):
         """
         Create a rotor with separate physics and visual components.
         Physics: Small rigid body for force application (connected via FixedJoint)
         Visual: Pure mesh for animation (no physics)
         """
 
-        rotor_radius = self.motor_params['rotor_radius']
+        rotor_radius = self.motor_params["rotor_radius"]
 
         # Get USD stage for creating geometry
         from omni.usd import get_context
+
         stage = get_context().get_stage()
 
         # Create rotor Xform container as child of body (for automatic transforms)
@@ -237,7 +285,9 @@ class Multirotor(Vehicle):
         rotor_xform = UsdGeom.Xform.Define(stage, rotor_xform_path)
 
         # Set rotor position relative to body
-        rotor_xform.AddTranslateOp().Set(Gf.Vec3d(position[0], position[1], position[2]))
+        rotor_xform.AddTranslateOp().Set(
+            Gf.Vec3d(position[0], position[1], position[2])
+        )
 
         # 1. Create PHYSICS component - small rigid body for force application
         rotor_physics_path = f"{rotor_xform_path}/rotor_physics"
@@ -245,7 +295,9 @@ class Multirotor(Vehicle):
 
         # Make physics component very small and invisible
         rotor_physics.CreateRadiusAttr(0.005)  # 5mm sphere
-        rotor_physics.CreateDisplayColorAttr([(1.0, 0.0, 0.0)])  # Red for debugging (will be invisible)
+        rotor_physics.CreateDisplayColorAttr(
+            [(1.0, 0.0, 0.0)]
+        )  # Red for debugging (will be invisible)
 
         # Apply physics to the physics component
         physics_prim = stage.GetPrimAtPath(rotor_physics_path)
@@ -271,7 +323,7 @@ class Multirotor(Vehicle):
         rotor_geom.AddScaleOp().Set(Gf.Vec3d(1.0, 0.15, 0.02))
 
         # Apply dark gray color
-        if hasattr(rotor_geom, 'CreateDisplayColorAttr'):
+        if hasattr(rotor_geom, "CreateDisplayColorAttr"):
             rotor_geom.CreateDisplayColorAttr([(0.2, 0.2, 0.2)])  # Dark gray
 
         # NO physics applied to visual - pure mesh only!
@@ -288,6 +340,7 @@ class Multirotor(Vehicle):
 
         # Get USD stage
         from omni.usd import get_context
+
         stage = get_context().get_stage()
 
         # Create fixed joint as child of rotor
@@ -295,8 +348,12 @@ class Multirotor(Vehicle):
         joint = UsdPhysics.FixedJoint.Define(stage, joint_path)
 
         # Connect main body rigid body to rotor physics rigid body
-        joint.CreateBody0Rel().SetTargets([f"{stage_prefix}/body/body_mesh"])  # Parent: main body
-        joint.CreateBody1Rel().SetTargets([f"{stage_prefix}/body/rotor{rotor_index}/rotor_physics"])  # Child: rotor physics
+        joint.CreateBody0Rel().SetTargets(
+            [f"{stage_prefix}/body/body_mesh"]
+        )  # Parent: main body
+        joint.CreateBody1Rel().SetTargets(
+            [f"{stage_prefix}/body/rotor{rotor_index}/rotor_physics"]
+        )  # Child: rotor physics
 
         return joint
 
@@ -305,8 +362,8 @@ class Multirotor(Vehicle):
         Create gimbal mount point if gimbal is enabled.
         """
 
-        gimbal_config = self.vehicle_config['vehicle']['gimbal']
-        mount_position = gimbal_config.get('mount_position', [0.0, 0.0, -0.05])
+        gimbal_config = self.vehicle_config["vehicle"]["gimbal"]
+        mount_position = gimbal_config.get("mount_position", [0.0, 0.0, -0.05])
 
         # Create mount point as a small cube
         mount = DynamicCuboid(
@@ -315,7 +372,7 @@ class Multirotor(Vehicle):
             position=np.array(mount_position),
             size=0.03,  # Small mount
             color=np.array([100, 100, 100]),
-            mass=0.1
+            mass=0.1,
         )
 
     def _setup_articulation(self, stage_prefix: str):
@@ -324,54 +381,75 @@ class Multirotor(Vehicle):
         This must be called AFTER all the vehicle structure is created.
         """
         from omni.usd import get_context
+
         stage = get_context().get_stage()
         root_prim = stage.GetPrimAtPath(stage_prefix)
         UsdPhysics.ArticulationRootAPI.Apply(root_prim)
 
     def _setup_vehicle_components(self):
         """
-        Setup sensors, thrusters, dynamics, and backends based on configuration.
+        Setup sensors, dynamics, and backends based on configuration.
         """
 
         # Setup backends (always use PX4 MAVLink)
-        backends = [PX4MavlinkBackend(config=PX4MavlinkBackendConfig())]
+        backend = PX4Backend(config=PX4BackendConfig())
 
         # Setup sensors
         sensors = []
-        sensor_config = self.vehicle_config['vehicle']['sensors']
+        sensor_config = self.vehicle_config["vehicle"]["sensors"]
 
-        if sensor_config.get('imu', {}).get('enabled', False):
-            imu_config = sensor_config['imu']
-            sensors.append(IMU({
-                "frequency": imu_config.get('frequency', 250),
-                "pos": imu_config.get('position', [0.0, 0.0, 0.0])
-            }))
+        if sensor_config.get("imu", {}).get("enabled", False):
+            carb.log_warn("Add IMU")
+            imu_config = sensor_config["imu"]
+            sensors.append(
+                IMU(
+                    {
+                        "update_rate": imu_config.get("update_rate", 250),
+                    }
+                )
+            )
 
-        if sensor_config.get('gps', {}).get('enabled', False):
-            gps_config = sensor_config['gps']
-            sensors.append(GPS({
-                "frequency": gps_config.get('frequency', 10),
-                "pos": gps_config.get('position', [0.0, 0.0, 0.02])
-            }))
+        if sensor_config.get("gps", {}).get("enabled", False):
+            carb.log_warn("Add GPS")
+            gps_config = sensor_config["gps"]
+            sensors.append(
+                GPS(
+                    {
+                        "update_rate": gps_config.get("update_rate", 10),
+                    }
+                )
+            )
 
-        if sensor_config.get('barometer', {}).get('enabled', False):
-            baro_config = sensor_config['barometer']
-            sensors.append(Barometer({
-                "frequency": baro_config.get('frequency', 50),
-                "pos": baro_config.get('position', [0.0, 0.0, 0.01])
-            }))
+        if sensor_config.get("barometer", {}).get("enabled", False):
+            carb.log_warn("Add Baro")
+            baro_config = sensor_config["barometer"]
+            sensors.append(
+                Barometer(
+                    {
+                        "update_rate": baro_config.get("update_rate", 50),
+                    }
+                )
+            )
+
+        if sensor_config.get("magnetometer", {}).get("enabled", False):
+            carb.log_warn("Add Mag")
+            mag_config = sensor_config["magnetometer"]
+            sensors.append(
+                Magnetometer(
+                    {
+                        "update_rate": mag_config.get("update_rate", 100),
+                    }
+                )
+            )
 
         # Setup graphical sensors (including gimbal)
         graphical_sensors = []
 
         # Add gimbal if configured
-        if self.vehicle_config['vehicle'].get('gimbal', {}).get('enabled', False):
-            gimbal_config_file = self.vehicle_config['vehicle']['gimbal']['config_file']
+        if self.vehicle_config["vehicle"].get("gimbal", {}).get("enabled", False):
+            gimbal_config_file = self.vehicle_config["vehicle"]["gimbal"]["config_file"]
             gimbal_system = GimbalSystem(gimbal_config_file, "gimbal_mount")
             graphical_sensors.append(gimbal_system)
-
-        # Setup thrust curve using motor parameters
-        thrust_curve = self._setup_thrust_curve()
 
         # Setup drag
         drag = LinearDrag([0.50, 0.30, 0.0])
@@ -380,32 +458,9 @@ class Multirotor(Vehicle):
         graphs = []
 
         # Store thrust curve and drag for vehicle dynamics
-        self._thrusters = thrust_curve
         self._drag = drag
 
-        return sensors, graphical_sensors, graphs, backends
-
-    def _setup_thrust_curve(self):
-        """
-        Setup quadratic thrust curve using motor parameters from database.
-        """
-
-        # Extract motor parameters
-        rotor_constant = self.motor_params['rotor_constant']
-        torque_coeff = self.motor_params['torque_coefficient']
-        max_velocity = self.motor_params['max_rotor_velocity']
-
-        # Create thrust curve configuration
-        thrust_config = {
-            "num_rotors": 4,
-            "rotor_constant": [rotor_constant] * 4,
-            "torque_coefficient": [torque_coeff] * 4,
-            "rot_dir": [-1, -1, 1, 1],  # Match Iris configuration
-            "max_rotor_velocity": [max_velocity] * 4,
-            "min_rotor_velocity": [0.0] * 4,
-        }
-
-        return QuadraticThrustCurve(thrust_config)
+        return sensors, graphical_sensors, graphs, backend
 
     def _setup_force_generators(self):
         """
@@ -414,20 +469,21 @@ class Multirotor(Vehicle):
         Joint handles will be connected later when simulation starts.
         """
         # Get motor parameters
-        thrust_coeff = self.motor_params['rotor_constant'] * 2.0  # Temporary 2x boost for better flight
-        torque_coeff = self.motor_params['torque_coefficient']
+        thrust_coeff = self.motor_params["rotor_constant"]
+        # Note: Removed 2x boost - Iris motor should provide sufficient power
+        torque_coeff = self.motor_params["torque_coefficient"]
 
         # Calculate rotor positions (same as in _create_quadrotor_x_structure)
         separation = self.rotor_separation
         rotor_height = 0.1  # 10cm above body center
         arm_length = separation / 2
 
-        # Standard X configuration positions
+        # PX4 X configuration positions - Isaac Sim coords: +X forward, +Y left, +Z up
         positions = [
-            [+arm_length, +arm_length, rotor_height],  # Front-right
-            [-arm_length, +arm_length, rotor_height],  # Front-left
-            [-arm_length, -arm_length, rotor_height],  # Rear-left
-            [+arm_length, -arm_length, rotor_height],  # Rear-right
+            [+arm_length, -arm_length, rotor_height],  # Motor 0: Front-right (+X, -Y)
+            [-arm_length, +arm_length, rotor_height],  # Motor 1: Rear-left (-X, +Y)
+            [+arm_length, +arm_length, rotor_height],  # Motor 2: Front-left (+X, +Y)
+            [-arm_length, -arm_length, rotor_height],  # Motor 3: Rear-right (-X, -Y)
         ]
 
         # Standard rotation directions (alternating for stability)
@@ -440,14 +496,18 @@ class Multirotor(Vehicle):
                 position=pos,
                 thrust_coefficient=thrust_coeff,
                 torque_coefficient=torque_coeff,
-                spin_direction=direction
+                spin_direction=direction,
             )
 
             # Set visual path for animation (target the rotation container, not the mesh)
-            visual_path = f"{self._stage_prefix}/body/rotor{i}/rotor_physics/rotor_rotation"
+            visual_path = (
+                f"{self._stage_prefix}/body/rotor{i}/rotor_physics/rotor_rotation"
+            )
             self.components[i].set_visual_path(visual_path)
 
-        carb.log_info(f"Registered 4 rotor force generators with indices 0-3 (joint handles will be connected when simulation starts)")
+        carb.log_info(
+            f"Registered 4 rotor force generators with indices 0-3 (joint handles will be connected when simulation starts)"
+        )
 
     def _connect_joint_handles(self):
         """
@@ -458,11 +518,15 @@ class Multirotor(Vehicle):
         articulation = self.get_dc_interface().get_articulation(self._stage_prefix)
 
         if not articulation:
-            carb.log_warn("Could not find articulation - joint handles will not be connected")
+            carb.log_warn(
+                "Could not find articulation - joint handles will not be connected"
+            )
             return
 
         # Using fixed joints for physics and transform-based visual animation
-        carb.log_info("Using fixed joints for physics and transform-based visual rotation")
+        carb.log_info(
+            "Using fixed joints for physics and transform-based visual rotation"
+        )
 
     def start(self):
         """Called when simulation starts - connect joint handles for visual rotation."""
@@ -514,9 +578,9 @@ class Multirotor(Vehicle):
         if self._manual_control_enabled:
             # Use manual motor speeds from UI
             desired_rotor_velocities = self._manual_motor_speeds.copy()
-        elif len(self._backends) != 0:
+        elif self._backend is not None:
             # Normal PX4 control path
-            desired_rotor_velocities = self._backends[0].input_reference()
+            desired_rotor_velocities = self._backend.input_reference()
         else:
             desired_rotor_velocities = [0.0 for i in range(4)]
 
@@ -531,11 +595,9 @@ class Multirotor(Vehicle):
         drag = self._drag.update(self._state, dt)
         self.apply_force(drag, body_part=self.relative_body_path)
 
-        # Update all backends
-        for backend in self._backends:
-            backend.update(dt)
-
-
+        # Update backend
+        if self._backend:
+            self._backend.update(dt)
 
     # ===============================================================
     # ---- Component Registration and Access Methods ----
@@ -546,15 +608,24 @@ class Multirotor(Vehicle):
         # Register rotors - note: rotors are visual-only, but we register paths for force application
         for i in range(4):
             # Register rotor visual path (rotation container for animation, actual mesh is child)
-            self.register_component(f"rotor{i}_visual", f"{self._stage_prefix}/body/rotor{i}/rotor_physics/rotor_rotation/rotor_visual")
+            self.register_component(
+                f"rotor{i}_visual",
+                f"{self._stage_prefix}/body/rotor{i}/rotor_physics/rotor_rotation/rotor_visual",
+            )
             # Register rotor physics path (for force application)
-            self.register_component(f"rotor{i}_physics", f"{self._stage_prefix}/body/rotor{i}/rotor_physics")
+            self.register_component(
+                f"rotor{i}_physics", f"{self._stage_prefix}/body/rotor{i}/rotor_physics"
+            )
             # Register joint path (for diagnostics)
-            self.register_component(f"joint{i}", f"{self._stage_prefix}/body/rotor{i}/joint{i}")
+            self.register_component(
+                f"joint{i}", f"{self._stage_prefix}/body/rotor{i}/joint{i}"
+            )
 
         # Register gimbal mount if present
-        if self.vehicle_config['vehicle'].get('gimbal', {}).get('enabled', False):
-            self.register_component("gimbal_mount", f"{self._stage_prefix}/body/gimbal_mount")
+        if self.vehicle_config["vehicle"].get("gimbal", {}).get("enabled", False):
+            self.register_component(
+                "gimbal_mount", f"{self._stage_prefix}/body/gimbal_mount"
+            )
 
     @property
     def rotor_count(self) -> int:

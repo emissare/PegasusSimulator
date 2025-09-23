@@ -21,13 +21,15 @@ class PX4LaunchTool:
     PX4 was already built with 'make px4_sitl_default none'), the vehicle id and the vehicle model. 
     """
 
-    def __init__(self, px4_dir, vehicle_id: int = 0, px4_model: str = "gazebo-classic_iris"):
+    def __init__(self, px4_dir, vehicle_id: int = 0, px4_model: str = "gazebo-classic_iris", latitude: float = 0.0, longitude: float = 0.0):
         """Construct the PX4LaunchTool object
 
         Args:
             px4_dir (str): A string with the path to the PX4-Autopilot directory
             vehicle_id (int): The ID of the vehicle. Defaults to 0.
             px4_model (str): The vehicle model. Defaults to "iris".
+            latitude (float): The latitude of the GPS origin. Defaults to 0.0.
+            longitude (float): The longitude of the GPS origin. Defaults to 0.0.
         """
 
         # Attribute that will hold the px4 process once it is running
@@ -35,6 +37,10 @@ class PX4LaunchTool:
 
         # The vehicle id (used for the mavlink port open in the system)
         self.vehicle_id = vehicle_id
+
+        # GPS origin coordinates
+        self.latitude = latitude
+        self.longitude = longitude
 
         # Flag to track if monitoring thread is running
         self._monitoring = False
@@ -50,14 +56,17 @@ class PX4LaunchTool:
         # Set the environement variables that let PX4 know which vehicle model to use internally
         self.environment = os.environ
         self.environment["PX4_SIM_MODEL"] = px4_model
-        self.environment["PX4_HOME_LAT"] = "32.774631"
-        self.environment["PX4_HOME_LON"] = "-117.079529"
+
+        # Set GPS origin coordinates for PX4
+        self.environment["PX4_HOME_LAT"] = str(self.latitude)
+        self.environment["PX4_HOME_LON"] = str(self.longitude)
 
     def launch_px4(self):
         """
         Method that will launch a px4 instance with the specified configuration
         """
         carb.log_info(f"Launching PX4 SITL (Vehicle ID: {self.vehicle_id})")
+        carb.log_info(f"GPS Origin: {self.latitude}, {self.longitude}")
 
         self.px4_process = subprocess.Popen(
             [
@@ -72,6 +81,7 @@ class PX4LaunchTool:
             cwd=self.root_fs.name,
             shell=False,
             env=self.environment,
+            stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
@@ -179,7 +189,7 @@ class PX4LaunchTool:
 # ---- Code used for debugging the px4 tool ----
 def main():
 
-    px4_tool = PX4LaunchTool(os.environ["HOME"] + "/PX4-Autopilot")
+    px4_tool = PX4LaunchTool(os.environ["HOME"] + "/PX4-Autopilot", 0, "gazebo-classic_iris", 32.77463, -117.07953)
     px4_tool.launch_px4()
 
     import time

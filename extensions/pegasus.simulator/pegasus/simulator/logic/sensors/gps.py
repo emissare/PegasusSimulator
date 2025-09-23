@@ -9,6 +9,7 @@ __all__ = ["GPS"]
 import numpy as np
 from pegasus.simulator.logic.sensors import Sensor
 from pegasus.simulator.logic.sensors.geo_mag_utils import reprojection
+from pegasus.simulator.logic.rotations import rot_FLU_inertial_to_NED_inertial
 
 # TODO - Introduce delay on the GPS data
 
@@ -162,6 +163,11 @@ class GPS(Sensor):
 
         cog = cog * 100
 
+        # Convert velocity from FLU inertial to NED inertial
+        # FLU: X=Front/North, Y=Left/West, Z=Up
+        # NED: X=North, Y=East, Z=Down
+        velocity_ned = rot_FLU_inertial_to_NED_inertial.apply(velocity)
+
         # Add the values to the dictionary and return it
         self._state = {
             "latitude": np.degrees(latitude),
@@ -170,10 +176,9 @@ class GPS(Sensor):
             "eph": 1.0,
             "epv": 1.0,
             "speed": speed,
-            # Conversion from ENU (standard of Isaac Sim to NED - used in GPS sensors)
-            "velocity_north": velocity[1],
-            "velocity_east": velocity[0],
-            "velocity_down": -velocity[2],
+            "velocity_north": velocity_ned[0],
+            "velocity_east": velocity_ned[1],
+            "velocity_down": velocity_ned[2],
             # Constant values
             "fix_type": self._fix_type,
             "eph": self._eph,

@@ -3,44 +3,54 @@
 
 vehicle:
   type: "quadrotor_x"           # Standard X configuration
-  name: "Basic Quadrotor"       # Display name
+  name: "PX4 Iris Quadrotor"    # Display name
 
-  # Physical configuration
-  rotor_separation: 0.3         # meters - diagonal distance between motors
+  # Physical configuration - matches PX4 Iris model
+  rotor_separation: 0.44        # meters - diagonal distance between motors (Iris spec)
   mass: 1.5                     # kg - total vehicle mass
-  motor: "Generic_Medium"       # Reference to motor database
+  motor: "Iris_Motor"           # Reference to motor database
 
-  # Body configuration
+  # Inertia configuration - from PX4 Iris gazebo-classic model
+  inertia:
+    ixx: 0.029125               # [kg⋅m²]
+    iyy: 0.029125               # [kg⋅m²]
+    izz: 0.055225               # [kg⋅m²]
+    ixy: 0.0                    # [kg⋅m²]
+    ixz: 0.0                    # [kg⋅m²]
+    iyz: 0.0                    # [kg⋅m²]
+
+  # Body configuration - scaled to match rotor separation
   body:
-    dimensions: [0.3, 0.3, 0.08]  # [length, width, height] in meters
-    color: [100, 100, 100]        # RGB color values (0-255)
+    dimensions: [0.44, 0.44, 0.08]  # [length, width, height] in meters
+    color: [100, 100, 100]          # RGB color values (0-255)
 
   # Standard sensors
   sensors:
     imu:
       enabled: true
-      frequency: 250              # Hz
-      position: [0.0, 0.0, 0.0]   # Center of body
+      update_rate: 250              # Hz
 
     gps:
       enabled: true
-      frequency: 10               # Hz
-      position: [0.0, 0.0, 0.02]  # Slightly above center
+      update_rate: 10               # Hz
 
     barometer:
       enabled: true
-      frequency: 50               # Hz
-      position: [0.0, 0.0, 0.01]  # Near center
+      update_rate: 50               # Hz
+
+    magnetometer:
+      enabled: true
+      update_rate: 250              # Hz
 
   # No gimbal configuration
   gimbal:
     enabled: false
 
-# Flight characteristics with Generic_Medium motor:
-# - Balanced agility and stability
-# - Moderate payload capacity
-# - Good for general testing and development
-# - 3.5-4 inch propeller compatibility
+# Flight characteristics with Iris_Motor:
+# - Matches PX4 Iris gazebo-classic model exactly
+# - Higher thrust capacity (1100 vs 950 rad/s max RPM)
+# - Realistic motor time constants for response
+# - Proper inertia matrix for accurate dynamics
 
 # Use cases:
 # - Basic flight testing

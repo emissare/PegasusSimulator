@@ -10,7 +10,10 @@ from scipy.spatial.transform import Rotation
 
 from pegasus.simulator.logic.state import State
 from pegasus.simulator.logic.sensors import Sensor
-from pegasus.simulator.logic.rotations import rot_ENU_to_NED, rot_FLU_to_FRD
+from pegasus.simulator.logic.rotations import (
+    rot_FLU_inertial_to_NED_inertial,
+    rot_FLU_body_to_FRD_body
+)
 from pegasus.simulator.logic.sensors.geo_mag_utils import (
     get_mag_declination,
     get_mag_inclination,
@@ -92,12 +95,12 @@ class Magnetometer(Sensor):
         # Magnetic field of a body following a front-left-up (FLU) convention expressed in a East-North-Up (ENU) inertial frame
         magnetic_field_inertial: np.ndarray = np.array([X, Y, Z])
 
-        # Rotate the magnetic field vector such that it expresses a field of a body frame according to the front-right-down (FRD)
-        # expressed in a North-East-Down (NED) inertial frame (the standard used in magnetometer units)
-        attitude_flu_enu = Rotation.from_quat(state.attitude)
+        # Get the attitude quaternion (FLU body in FLU inertial)
+        attitude_flu_flu = Rotation.from_quat(state.attitude)
 
-        # Rotate the magnetic field from the inertial frame to the body frame of reference according to the FLU frame convention
-        rot_body_to_world = rot_ENU_to_NED * attitude_flu_enu * rot_FLU_to_FRD.inv()
+        # Transform to FRD body in NED inertial
+        # This gives us the rotation from NED inertial to FRD body
+        rot_body_to_world = rot_FLU_inertial_to_NED_inertial * attitude_flu_flu * rot_FLU_body_to_FRD_body.inv()
 
         # The magnetic field expressed in the body frame according to the front-right-down (FRD) convention
         magnetic_field_body = rot_body_to_world.inv().apply(magnetic_field_inertial)

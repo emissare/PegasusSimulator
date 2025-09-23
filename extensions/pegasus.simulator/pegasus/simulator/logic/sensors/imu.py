@@ -11,7 +11,10 @@ from scipy.spatial.transform import Rotation
 
 from pegasus.simulator.logic.state import State
 from pegasus.simulator.logic.sensors import Sensor
-from pegasus.simulator.logic.rotations import rot_FLU_to_FRD, rot_ENU_to_NED
+from pegasus.simulator.logic.rotations import (
+    rot_FLU_body_to_FRD_body,
+    rot_FLU_inertial_to_NED_inertial
+)
 from pegasus.simulator.logic.sensors.geo_mag_utils import GRAVITY_VECTOR
 
 
@@ -153,16 +156,17 @@ class IMU(Sensor):
         # Apply rotations such that we express the IMU data according to the FRD body frame convention
         # --------------------------------------------------------------------------------------------
 
-        # Convert the orientation to the FRD-NED standard
-        attitude_flu_enu = Rotation.from_quat(state.attitude)
-        attitude_frd_enu = attitude_flu_enu * rot_FLU_to_FRD
-        attitude_frd_ned = rot_ENU_to_NED * attitude_frd_enu
+        # Convert the orientation from FLU/FLU to FRD/NED standard
+        # Input: FLU body in FLU inertial (from Isaac)
+        # Output: FRD body in NED inertial (for PX4)
+        attitude_flu_flu = Rotation.from_quat(state.attitude)
+        attitude_frd_ned = rot_FLU_inertial_to_NED_inertial * attitude_flu_flu * rot_FLU_body_to_FRD_body
 
-        # Convert the angular velocity from FLU to FRD standard
-        angular_velocity_frd = rot_FLU_to_FRD.apply(angular_velocity)
+        # Convert the angular velocity from FLU body to FRD body frame
+        angular_velocity_frd = rot_FLU_body_to_FRD_body.apply(angular_velocity)
 
-        # Convert the linear acceleration in the body frame from FLU to FRD standard
-        linear_acceleration_frd = rot_FLU_to_FRD.apply(linear_acceleration)
+        # Convert the linear acceleration from FLU body to FRD body frame
+        linear_acceleration_frd = rot_FLU_body_to_FRD_body.apply(linear_acceleration)
 
         # Add the values to the dictionary and return it
         self._state = {

@@ -20,6 +20,7 @@ from abc import ABC, abstractmethod
 try:
     from omni.usd import get_context
     from pxr import UsdGeom
+
     USD_AVAILABLE = True
 except ImportError:
     USD_AVAILABLE = False
@@ -73,8 +74,13 @@ class SpinningBody(ForceGenerator):
     This is fundamental physics that occurs even in a vacuum.
     """
 
-    def __init__(self, position: np.ndarray, thrust_coefficient: float,
-                 torque_coefficient: float, spin_direction: int):
+    def __init__(
+        self,
+        position: np.ndarray,
+        thrust_coefficient: float,
+        torque_coefficient: float,
+        spin_direction: int,
+    ):
         """
         Initialize spinning body (rotor/propeller).
 
@@ -115,7 +121,8 @@ class SpinningBody(ForceGenerator):
         # Motor reaction torque (Newton's 3rd law)
         # When motor spins rotor in one direction, body experiences opposite torque
         motor_torque = self.torque_coefficient * angular_velocity**2
-        reaction_torque = -motor_torque * self.spin_direction
+        reaction_torque = motor_torque * self.spin_direction
+
         torque = np.array([0.0, 0.0, reaction_torque])
 
         return force, torque
@@ -129,7 +136,7 @@ class SpinningBody(ForceGenerator):
         """
         self.visual_path = visual_path
 
-    def update_visual_rotation(self, angular_velocity: float, dt: float = 1.0/60.0):
+    def update_visual_rotation(self, angular_velocity: float, dt: float = 1.0 / 60.0):
         """
         Update visual rotation using transform operations.
 
@@ -178,8 +185,10 @@ class SpinningBody(ForceGenerator):
 
     def __repr__(self):
         direction_str = "CW" if self.spin_direction == 1 else "CCW"
-        return (f"SpinningBody(pos={self.position}, thrust_k={self.thrust_coefficient}, "
-                f"torque_k={self.torque_coefficient}, dir={direction_str})")
+        return (
+            f"SpinningBody(pos={self.position}, thrust_k={self.thrust_coefficient}, "
+            f"torque_k={self.torque_coefficient}, dir={direction_str})"
+        )
 
 
 class LiftingSurface(ForceGenerator):
@@ -196,8 +205,12 @@ class LiftingSurface(ForceGenerator):
     The ForceGenerator doesn't need to calculate these moments directly.
     """
 
-    def __init__(self, position: np.ndarray, lift_coefficient: float,
-                 lift_direction: np.ndarray = np.array([0, 0, 1])):
+    def __init__(
+        self,
+        position: np.ndarray,
+        lift_coefficient: float,
+        lift_direction: np.ndarray = np.array([0, 0, 1]),
+    ):
         """
         Initialize lifting surface.
 
@@ -242,7 +255,7 @@ class LiftingSurface(ForceGenerator):
         return force, torque
 
     def __repr__(self):
-        return (f"LiftingSurface(pos={self.position}, lift_k={self.lift_coefficient}, "
-                f"direction={self.lift_direction})")
-
-
+        return (
+            f"LiftingSurface(pos={self.position}, lift_k={self.lift_coefficient}, "
+            f"direction={self.lift_direction})"
+        )

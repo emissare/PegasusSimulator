@@ -24,7 +24,11 @@ from omni.isaac.dynamic_control import _dynamic_control
 from pegasus.simulator.logic.state import State
 from pegasus.simulator.logic.interface.pegasus_interface import PegasusInterface
 from pegasus.simulator.logic.vehicle_manager import VehicleManager
-from pegasus.simulator.logic.force_generators import ForceGenerator, SpinningBody, LiftingSurface
+from pegasus.simulator.logic.force_generators import (
+    ForceGenerator,
+    SpinningBody,
+    LiftingSurface,
+)
 
 
 def get_world_transform_xform(prim: Usd.Prim):
@@ -45,7 +49,7 @@ def get_world_transform_xform(prim: Usd.Prim):
 
 
 class Vehicle(Robot):
-    
+
     def __init__(
         self,
         stage_prefix: str,
@@ -55,7 +59,7 @@ class Vehicle(Robot):
         sensors=[],
         graphical_sensors=[],
         graphs=[],
-        backends=[]
+        backend=None,
     ):
         """
         Class that initializes a vehicle in the isaac sim's curent stage
@@ -73,7 +77,9 @@ class Vehicle(Robot):
 
         # Save the name with which the vehicle will appear in the stage
         # and the name of the .usd file that contains its description
-        self._stage_prefix = get_stage_next_free_path(self._current_stage, stage_prefix, False)
+        self._stage_prefix = get_stage_next_free_path(
+            self._current_stage, stage_prefix, False
+        )
         self._usd_file = usd_path
 
         # Get the vehicle name by taking the last part of vehicle stage prefix
@@ -94,7 +100,12 @@ class Vehicle(Robot):
             prim_path=self._stage_prefix,
             name=self._stage_prefix,
             position=init_pos,
-            orientation=[init_orientation[3], init_orientation[0], init_orientation[1], init_orientation[2]],
+            orientation=[
+                init_orientation[3],
+                init_orientation[0],
+                init_orientation[1],
+                init_orientation[2],
+            ],
             articulation_controller=None,
         )
 
@@ -106,18 +117,22 @@ class Vehicle(Robot):
             self._world.scene.add(self)
         except Exception as e:
             if "name is not unique" in str(e):
-                carb.log_warn(f"Vehicle {self._stage_prefix} already exists in scene, reusing existing entry")
+                carb.log_warn(
+                    f"Vehicle {self._stage_prefix} already exists in scene, reusing existing entry"
+                )
                 # Remove the existing entry and try again
                 try:
                     # Try to find and remove the existing object
                     for obj in self._world.scene._scene_registry:
-                        if hasattr(obj, 'name') and obj.name == self._stage_prefix:
+                        if hasattr(obj, "name") and obj.name == self._stage_prefix:
                             self._world.scene._scene_registry.remove(obj)
                             break
                     # Now add this new one
                     self._world.scene.add(self)
                 except:
-                    carb.log_error(f"Failed to resolve scene conflict for {self._stage_prefix}, continuing anyway")
+                    carb.log_error(
+                        f"Failed to resolve scene conflict for {self._stage_prefix}, continuing anyway"
+                    )
             else:
                 raise e
 
@@ -129,7 +144,9 @@ class Vehicle(Robot):
         self._state = State()
 
         # Add a callback to the physics engine to update the current state of the system
-        self._world.add_physics_callback(self._stage_prefix + "/state", self.update_state)
+        self._world.add_physics_callback(
+            self._stage_prefix + "/state", self.update_state
+        )
 
         # Add the update method to the physics callback if the world was received
         # so that we can apply forces and torques to the vehicle. Note, this method should        # be implemented in classes that inherit the vehicle object
@@ -139,19 +156,28 @@ class Vehicle(Robot):
         self._sim_running = False
 
         # Add a callback to start/stop of the simulation once the play/stop button is hit
-        self._world.add_timeline_callback(self._stage_prefix + "/start_stop_sim", self.sim_start_stop)
+        self._world.add_timeline_callback(
+            self._stage_prefix + "/start_stop_sim", self.sim_start_stop
+        )
 
         # --------------------------------------------------------------------
         # -------------------- Add sensors to the vehicle --------------------
         # --------------------------------------------------------------------
         self._sensors = sensors
-        
+
         for sensor in self._sensors:
-            sensor.initialize(self, PegasusInterface().latitude, PegasusInterface().longitude, PegasusInterface().altitude)
+            sensor.initialize(
+                self,
+                PegasusInterface().latitude,
+                PegasusInterface().longitude,
+                PegasusInterface().altitude,
+            )
 
         # Add callbacks to the physics engine to update each sensor at every timestep
         # and let the sensor decide depending on its internal update rate whether to generate new data
-        self._world.add_physics_callback(self._stage_prefix + "/Sensors", self.update_sensors)
+        self._world.add_physics_callback(
+            self._stage_prefix + "/Sensors", self.update_sensors
+        )
 
         # --------------------------------------------------------------------
         # -------------------- Add the graphical sensors to the vehicle ------
@@ -162,8 +188,9 @@ class Vehicle(Robot):
             graphical_sensor.initialize(self)
 
         # Add callbacks to the rendering engine to update each graphical sensor at every timestep of the rendering engine
-        self._world.add_render_callback(self._stage_prefix + "/GraphicalSensors", self.update_graphical_sensors)
-
+        self._world.add_render_callback(
+            self._stage_prefix + "/GraphicalSensors", self.update_graphical_sensors
+        )
 
         # --------------------------------------------------------------------
         # -------------------- Add the graphs to the vehicle -----------------
@@ -172,18 +199,20 @@ class Vehicle(Robot):
 
         for graph in self._graphs:
             graph.initialize(self)
-        
-        # --------------------------------------------------------------------
-        # ---- Add (communication/control) backends to the vehicle -----------
-        # --------------------------------------------------------------------
-        self._backends = backends
 
-        # Initialize the backends
-        for backend in self._backends:
-            backend.initialize(self)
+        # --------------------------------------------------------------------
+        # ---- Add (communication/control) backend to the vehicle -----------
+        # --------------------------------------------------------------------
+        self._backend = backend
+
+        # Initialize the backend
+        if self._backend:
+            self._backend.initialize(self)
 
         # Add a callbacks for the
-        self._world.add_physics_callback(self._stage_prefix + "/mav_state", self.update_sim_state)
+        self._world.add_physics_callback(
+            self._stage_prefix + "/mav_state", self.update_sim_state
+        )
 
         # ===============================================================
         # ---- Component Registry for Standardized Access ----
@@ -197,17 +226,18 @@ class Vehicle(Robot):
         # ===============================================================
 
         # Initialize force generator system
-        self.components = {}  # Dictionary of all force-generating components {index: component}
-
+        self.components = (
+            {}
+        )  # Dictionary of all force-generating components {index: component}
 
     def __del__(self):
         """
-        Method that is invoked when a vehicle object gets destroyed. When this happens, we also invoke the 
+        Method that is invoked when a vehicle object gets destroyed. When this happens, we also invoke the
         'remove_vehicle' from the VehicleManager in order to remove the vehicle from the list of active vehicles.
         """
 
         # Remove this object from the vehicleHandler (only if _stage_prefix exists)
-        if hasattr(self, '_stage_prefix'):
+        if hasattr(self, "_stage_prefix"):
             VehicleManager.get_vehicle_manager().remove_vehicle(self._stage_prefix)
 
     """
@@ -222,7 +252,7 @@ class Vehicle(Robot):
             State: The current state of the vehicle, i.e., position, orientation, linear and angular velocities...
         """
         return self._state
-    
+
     @property
     def vehicle_name(self) -> str:
         """Vehicle name.
@@ -326,8 +356,14 @@ class Vehicle(Robot):
     # ---- Force Generator System ----
     # ===============================================================
 
-    def add_spinning_body(self, index: int, position: list, thrust_coefficient: float,
-                         torque_coefficient: float, spin_direction: int) -> int:
+    def add_spinning_body(
+        self,
+        index: int,
+        position: list,
+        thrust_coefficient: float,
+        torque_coefficient: float,
+        spin_direction: int,
+    ) -> int:
         """
         Add a motor-driven rotor that generates thrust force and reaction torque.
 
@@ -345,17 +381,23 @@ class Vehicle(Robot):
             raise ValueError(f"Component index {index} already in use")
 
         import numpy as np
+
         generator = SpinningBody(
             position=np.array(position),
             thrust_coefficient=thrust_coefficient,
             torque_coefficient=torque_coefficient,
-            spin_direction=spin_direction
+            spin_direction=spin_direction,
         )
         self.components[index] = generator
         return index
 
-    def add_lifting_surface(self, index: int, position: list, lift_coefficient: float,
-                           lift_direction: list = [0, 0, 1]) -> int:
+    def add_lifting_surface(
+        self,
+        index: int,
+        position: list,
+        lift_coefficient: float,
+        lift_direction: list = [0, 0, 1],
+    ) -> int:
         """
         Add a lifting surface that generates only aerodynamic forces.
 
@@ -372,15 +414,16 @@ class Vehicle(Robot):
             raise ValueError(f"Component index {index} already in use")
 
         import numpy as np
+
         generator = LiftingSurface(
             position=np.array(position),
             lift_coefficient=lift_coefficient,
-            lift_direction=np.array(lift_direction)
+            lift_direction=np.array(lift_direction),
         )
         self.components[index] = generator
         return index
 
-    def apply_forces(self, inputs: dict, dt: float = 1.0/60.0):
+    def apply_forces(self, inputs: dict, dt: float = 1.0 / 60.0):
         """
         Apply forces and torques from components based on input dictionary.
 
@@ -395,7 +438,10 @@ class Vehicle(Robot):
         """
         import numpy as np
         import carb
-        from pegasus.simulator.logic.force_generators import SpinningBody, LiftingSurface
+        from pegasus.simulator.logic.force_generators import (
+            SpinningBody,
+            LiftingSurface,
+        )
 
         for index, input_value in inputs.items():
             if index not in self.components:
@@ -415,13 +461,12 @@ class Vehicle(Robot):
                     self.apply_force(
                         force.tolist(),
                         pos=[0.0, 0.0, 0.0],  # Apply at center of rotor physics body
-                        body_part=rotor_physics_path
+                        body_part=rotor_physics_path,
                     )
 
                 if np.any(torque):
                     self.apply_torque(
-                        torque.tolist(),
-                        body_part=rotor_physics_path
+                        torque.tolist(), body_part=self.relative_body_path
                     )
 
                 # Update visual rotation
@@ -436,7 +481,7 @@ class Vehicle(Robot):
                     self.apply_force(
                         force.tolist(),
                         pos=component.position.tolist(),
-                        body_part=self.relative_body_path
+                        body_part=self.relative_body_path,
                     )
 
     def get_components(self) -> dict:
@@ -481,9 +526,9 @@ class Vehicle(Robot):
             for graphical_sensor in self._graphical_sensors:
                 graphical_sensor.start()
 
-            # Intializes the communication with all the backends. This method is invoked automatically when the simulation starts
-            for backend in self._backends:
-                backend.start()
+            # Intializes the communication with the backend. This method is invoked automatically when the simulation starts
+            if self._backend:
+                self._backend.start()
 
             # Invoke the start method of the vehicle (if it exists)
             self.start()
@@ -502,9 +547,9 @@ class Vehicle(Robot):
             for graphical_sensor in self._graphical_sensors:
                 graphical_sensor.stop()
 
-            # Signal all the backends that the simulation has stoped. This method is invoked automatically when the simulation stops
-            for backend in self._backends:
-                backend.stop()
+            # Signal the backend that the simulation has stoped. This method is invoked automatically when the simulation stops
+            if self._backend:
+                self._backend.stop()
 
             self.stop()
 
@@ -524,7 +569,9 @@ class Vehicle(Robot):
 
         if rb:
             # Apply the force to the rigidbody. The force should be expressed in the rigidbody frame
-            self.get_dc_interface().apply_body_force(rb, carb._carb.Float3(force), carb._carb.Float3(pos), False)
+            self.get_dc_interface().apply_body_force(
+                rb, carb._carb.Float3(force), carb._carb.Float3(pos), False
+            )
 
     def apply_torque(self, torque, body_part="/body"):
         """
@@ -540,7 +587,9 @@ class Vehicle(Robot):
 
         if rb:
             # Apply the torque to the rigidbody. The torque should be expressed in the rigidbody frame
-            self.get_dc_interface().apply_body_torque(rb, carb._carb.Float3(torque), False)
+            self.get_dc_interface().apply_body_torque(
+                rb, carb._carb.Float3(torque), False
+            )
 
     def update_state(self, dt: float):
         """
@@ -578,8 +627,19 @@ class Vehicle(Robot):
 
         # Get the quaternion according in the [qx,qy,qz,qw] standard
         self._state.attitude = np.array(
-            [rotation_quat_img[0], rotation_quat_img[1], rotation_quat_img[2], rotation_quat_real]
+            [
+                rotation_quat_img[0],
+                rotation_quat_img[1],
+                rotation_quat_img[2],
+                rotation_quat_real,
+            ]
         )
+
+        # DEBUG: Log raw quaternion values
+        import carb
+        carb.log_warn(f"[DEBUG] Vehicle at position: {self._state.position}")
+        carb.log_warn(f"[DEBUG] Isaac quaternion (w,x,y,z): ({rotation_quat_real:.4f}, {rotation_quat_img[0]:.4f}, {rotation_quat_img[1]:.4f}, {rotation_quat_img[2]:.4f})")
+        carb.log_warn(f"[DEBUG] State quaternion (x,y,z,w): {self._state.attitude}")
 
         # Express the velocity of the vehicle in the inertial frame X_dot = [x_dot, y_dot, z_dot]
         self._state.linear_velocity = np.array(linear_vel)
@@ -587,11 +647,15 @@ class Vehicle(Robot):
         # The linear velocity V =[u,v,w] of the vehicle's body frame expressed in the body frame of reference
         # Note that: x_dot = Rot * V
         self._state.linear_body_velocity = (
-            Rotation.from_quat(self._state.attitude).inv().apply(self._state.linear_velocity)
+            Rotation.from_quat(self._state.attitude)
+            .inv()
+            .apply(self._state.linear_velocity)
         )
 
         # omega = [p,q,r]
-        self._state.angular_velocity = Rotation.from_quat(self._state.attitude).inv().apply(np.array(ang_vel))
+        self._state.angular_velocity = (
+            Rotation.from_quat(self._state.attitude).inv().apply(np.array(ang_vel))
+        )
 
         # The acceleration of the vehicle expressed in the inertial frame X_ddot = [x_ddot, y_ddot, z_ddot]
         self._state.linear_acceleration = linear_acceleration
@@ -622,7 +686,7 @@ class Vehicle(Robot):
     def update_sensors(self, dt: float):
         """Callback that is called at every physics steps and will call the sensor.update method to generate new
         sensor data. For each data that the sensor generates, the backend.update_sensor method will also be called for
-        every backend. For example, if new data is generated for an IMU and we have a PX4MavlinkBackend, then the update_sensor
+        the backend. For example, if new data is generated for an IMU and we have a PX4Backend, then the update_sensor
         method will be called for that backend so that this data can latter be sent thorugh mavlink.
 
         Args:
@@ -633,15 +697,14 @@ class Vehicle(Robot):
         for sensor in self._sensors:
             sensor_data = sensor.update(self._state, dt)
 
-            # If some data was updated and we have a mavlink backend or ros backend (or other), then just update it
-            if sensor_data is not None:
-                for backend in self._backends:
-                    backend.update_sensor(sensor.sensor_type, sensor_data)
+            # If some data was updated and we have a backend, then just update it
+            if sensor_data is not None and self._backend:
+                self._backend.update_sensor(sensor.sensor_type, sensor_data)
 
     def update_graphical_sensors(self, event):
         """Callback that is called at every rendering steps and will call the graphical_sensor.update method to generate new
         sensor data. For each data that the sensor generates, the backend.update_graphical_sensor method will also be called for
-        every backend. For example, if new data is generated for a monocular camera and we have a ROS2Backend, then the update_graphical_sensor
+        the backend. For example, if new data is generated for a monocular camera and we have a backend, then the update_graphical_sensor
         method will be called for that backend so that this data can latter be sent through a ROS2 topic.
 
         Args:
@@ -650,12 +713,11 @@ class Vehicle(Robot):
 
         # Call the update method for the sensor to update its values internally (if applicable)
         for sensor in self._graphical_sensors:
-            sensor_data = sensor.update(self._state, event.payload['dt'])
+            sensor_data = sensor.update(self._state, event.payload["dt"])
 
-            # If some data was updated and we have a ros backend (or other), then just update it
-            if sensor_data is not None:
-                for backend in self._backends:
-                    backend.update_graphical_sensor(sensor.sensor_type, sensor_data)
+            # If some data was updated and we have a backend, then just update it
+            if sensor_data is not None and self._backend:
+                self._backend.update_graphical_sensor(sensor.sensor_type, sensor_data)
 
     def update_sim_state(self, dt: float):
         """
@@ -665,12 +727,14 @@ class Vehicle(Robot):
         Args:
             dt (float): The time elapsed between the previous and current function calls (s).
         """
-        for backend in self._backends:
-            backend.update_state(self._state)
+        if self._backend:
+            self._backend.update_state(self._state)
 
     def get_dc_interface(self):
 
         if self._vehicle_dc_interface is None:
-            self._vehicle_dc_interface = _dynamic_control.acquire_dynamic_control_interface()
+            self._vehicle_dc_interface = (
+                _dynamic_control.acquire_dynamic_control_interface()
+            )
 
         return self._vehicle_dc_interface
