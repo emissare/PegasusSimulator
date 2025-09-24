@@ -31,21 +31,6 @@ from pegasus.simulator.logic.force_generators import (
 )
 
 
-def get_world_transform_xform(prim: Usd.Prim):
-    """
-    Get the local transformation of a prim using omni.usd.get_world_transform_matrix().
-    See https://docs.omniverse.nvidia.com/kit/docs/omni.usd/latest/omni.usd/omni.usd.get_world_transform_matrix.html
-    Args:
-        prim (Usd.Prim): The prim to calculate the world transformation.
-    Returns:
-        A tuple of:
-        - Translation vector.
-        - Rotation quaternion, i.e. 3d vector plus angle.
-        - Scale vector.
-    """
-    world_transform: Gf.Matrix4d = omni.usd.get_world_transform_matrix(prim)
-    rotation: Gf.Rotation = world_transform.ExtractRotation()
-    return rotation
 
 
 class Vehicle(Robot):
@@ -139,6 +124,12 @@ class Vehicle(Robot):
         VehicleManager.get_vehicle_manager().add_vehicle(self._stage_prefix, self)
         self._state = VehicleState()
 
+        # Logging configuration
+        self._log_interval = 1.0  # Log every 1 second
+        self._log_sensors = True  # Enable sensor data logging
+        self._last_log_time = 0.0
+        self._total_sim_time = 0.0
+
         # Single monolithic physics callback for all updates
         self._world.add_physics_callback(
             self._stage_prefix + "/main_physics_update", self._main_physics_update
@@ -193,26 +184,12 @@ class Vehicle(Robot):
         if hasattr(self, "_stage_prefix"):
             VehicleManager.get_vehicle_manager().remove_vehicle(self._stage_prefix)
 
-    """
-    Properties
-    """
-
     @property
     def state(self):
-        """The state of the vehicle.
-
-        Returns:
-            VehicleState: The current state of the vehicle, i.e., position, orientation, linear and angular velocities...
-        """
         return self._state
 
     @property
     def vehicle_name(self) -> str:
-        """Vehicle name.
-
-        Returns:
-            Vehicle name (str): last prim name in vehicle prim path
-        """
         return self._vehicle_name
 
     # ===============================================================
@@ -245,11 +222,6 @@ class Vehicle(Robot):
 
     @property
     def root_path(self) -> str:
-        """Get path to vehicle root.
-
-        Returns:
-            str: Path to vehicle root (e.g., "/quadrotor")
-        """
         return self._stage_prefix
 
     def register_component(self, name: str, path: str):
@@ -265,41 +237,15 @@ class Vehicle(Robot):
         self._component_paths[name] = path
 
     def get_component_path(self, component_name: str) -> str:
-        """Get path to named component.
-
-        Args:
-            component_name (str): Name of component to look up
-
-        Returns:
-            str: Path to component or None if not found
-        """
         return self._component_paths.get(component_name)
 
     def get_registered_components(self) -> dict:
-        """Get all registered components.
-
-        Returns:
-            dict: Dictionary of component_name -> path
-        """
         return self._component_paths.copy()
 
     def get_body_rigid(self):
-        """Get the primary body rigid body handle.
-
-        Returns:
-            Rigid body handle for the primary vehicle body
-        """
         return self.get_dc_interface().get_rigid_body(self.body_path)
 
     def get_component_rigid(self, component_name: str):
-        """Get rigid body handle for named component.
-
-        Args:
-            component_name (str): Name of component
-
-        Returns:
-            Rigid body handle or None if component not found
-        """
         path = self.get_component_path(component_name)
         if path:
             return self.get_dc_interface().get_rigid_body(path)
@@ -413,7 +359,11 @@ class Vehicle(Robot):
                 if np.any(force):
                     self.apply_force(
                         force.tolist(),
-                        pos=[0.0, 0.0, 0.0],  # Apply at center of rotor physics body
+                        pos_frd=[
+                            0.0,
+                            0.0,
+                            0.0,
+                        ],  # Apply at center of rotor physics body
                         body_part=rotor_physics_path,
                     )
 
@@ -433,7 +383,7 @@ class Vehicle(Robot):
                     # TODO: Consider orientation/airspeed for realistic lift
                     self.apply_force(
                         force.tolist(),
-                        pos=component.position.tolist(),
+                        pos_frd=component.position.tolist(),
                         body_part=self.relative_body_path,
                     )
 
@@ -584,6 +534,15 @@ class Vehicle(Robot):
             self._backend.update_state(self._state)
             self._backend.update(dt)
 
+        # Step 5: Log vehicle state and sensor data for debugging
+        self._total_sim_time += dt
+        if (
+            self._log_sensors
+            and self._total_sim_time - self._last_log_time >= self._log_interval
+        ):
+            self._log_vehicle_state_comparison()
+            self._last_log_time = self._total_sim_time
+
     def update_state(self, dt: float):
         """
         Method that is called at every physics step to retrieve and update the current state of the vehicle, i.e., get
@@ -593,47 +552,39 @@ class Vehicle(Robot):
             dt (float): The time elapsed between the previous and current function calls (s).
         """
 
-        # Get the body frame interface of the vehicle (this will be the frame used to get the position, orientation, etc.)
+        # Get the body frame interface of the vehicle
         body = self.get_dc_interface().get_rigid_body(self.body_path)
 
-        # Get the current position and orientation in the inertial frame
+        # Get the current position and rotation from the SAME API
         pose = self.get_dc_interface().get_rigid_body_pose(body)
 
-        # Get the attitude according to the convention [w, x, y, z]
-        prim = self._world.stage.GetPrimAtPath(self.body_path)
-        rotation_quat = get_world_transform_xform(prim).GetQuaternion()
-        rotation_quat_real = rotation_quat.GetReal()
-        rotation_quat_img = rotation_quat.GetImaginary()
+        # Get position in NWU world frame
+        position_nwu_m = np.array(pose.p)
 
-        # Get the angular velocity of the vehicle expressed in the body frame of reference
-        ang_vel = self.get_dc_interface().get_rigid_body_angular_velocity(body)
+        # Get attitude quaternion (rotation from NWU world to FLU body)
+        # pose.r is already in scipy convention [qx, qy, qz, qw]
+        attitude_flu_nwu_quat = np.array(pose.r)
 
-        # The linear velocity [x_dot, y_dot, z_dot] of the vehicle's body frame expressed in the inertial frame of reference
+        # Get linear velocity in NWU world frame
         linear_vel = self.get_dc_interface().get_rigid_body_linear_velocity(body)
+        linear_velocity_nwu_mps = np.array(linear_vel)
 
-        # Prepare raw Isaac data
-        position_flu_m = np.array(pose.p)
-        attitude_flu_quat = np.array(
-            [
-                rotation_quat_img[0],
-                rotation_quat_img[1],
-                rotation_quat_img[2],
-                rotation_quat_real,
-            ]
-        )
-        linear_velocity_flu_mps = np.array(linear_vel)
+        # Get angular velocity (Isaac returns it in NWU world frame)
+        ang_vel = self.get_dc_interface().get_rigid_body_angular_velocity(body)
+        angular_velocity_nwu_rps = np.array(ang_vel)
 
-        # Convert angular velocity from world to body frame
-        angular_velocity_world = np.array(ang_vel)
+        # Convert angular velocity from NWU world frame to FLU body frame
         angular_velocity_flu_body_rps = (
-            Rotation.from_quat(attitude_flu_quat).inv().apply(angular_velocity_world)
+            Rotation.from_quat(attitude_flu_nwu_quat)
+            .inv()
+            .apply(angular_velocity_nwu_rps)
         )
 
         # Update state using the single source of truth method
         self._state.update_from_isaac(
-            position_flu_m=position_flu_m,
-            attitude_flu_quat=attitude_flu_quat,
-            linear_velocity_flu_mps=linear_velocity_flu_mps,
+            position_nwu_m=position_nwu_m,
+            attitude_flu_nwu_quat=attitude_flu_nwu_quat,
+            linear_velocity_nwu_mps=linear_velocity_nwu_mps,
             angular_velocity_flu_rps=angular_velocity_flu_body_rps,
             dt=dt,
         )
@@ -649,6 +600,201 @@ class Vehicle(Robot):
         Method that should be implemented by the class that inherits the vehicle object.
         """
         pass
+
+    def _log_vehicle_state_comparison(self):
+        """
+        Log quaternions and attitude transformations for debugging.
+        All other logging is commented out until attitude is correct.
+        """
+        from scipy.spatial.transform import Rotation
+
+        # Get attitude quaternion from vehicle state
+        att_quat_frd_ned = self._state.attitude_frd_ned_quat
+
+        # Start logging
+        carb.log_info("\n" + "=" * 70)
+        carb.log_info(f"[ATTITUDE STATE @ t={self._total_sim_time:.2f}s] {self._vehicle_name}")
+        carb.log_info("=" * 70)
+
+        # Get the FLU_NWU quaternion from current vehicle state
+        # (This is now coming directly from pose.r)
+        flu_nwu_quat = self._state._attitude_flu_nwu_quat_internal if hasattr(self._state, '_attitude_flu_nwu_quat_internal') else None
+
+        if flu_nwu_quat is not None:
+            carb.log_info("FLU_NWU QUATERNION (qx, qy, qz, qw):")
+            carb.log_info(f"  {flu_nwu_quat.tolist()}")
+
+            # Convert to Euler
+            flu_nwu_rot = Rotation.from_quat(flu_nwu_quat)
+            flu_nwu_euler_zyx = flu_nwu_rot.as_euler('ZYX', degrees=True)
+            carb.log_info(f"  Euler ZYX: [Yaw={flu_nwu_euler_zyx[0]:7.2f}°, Pitch={flu_nwu_euler_zyx[1]:7.2f}°, Roll={flu_nwu_euler_zyx[2]:7.2f}°]")
+
+        carb.log_info("\nFRD_NED QUATERNION (qx, qy, qz, qw):")
+        carb.log_info(f"  {att_quat_frd_ned.tolist()}")
+
+        # Convert to Euler
+        frd_ned_rot = Rotation.from_quat(att_quat_frd_ned)
+        frd_ned_euler_zyx = frd_ned_rot.as_euler('ZYX', degrees=True)
+        carb.log_info(f"  Euler ZYX: [Yaw={frd_ned_euler_zyx[0]:7.2f}°, Pitch={frd_ned_euler_zyx[1]:7.2f}°, Roll={frd_ned_euler_zyx[2]:7.2f}°]")
+
+        # Also show XYZ Euler angles (Roll, Pitch, Yaw)
+        frd_ned_euler_xyz = frd_ned_rot.as_euler('XYZ', degrees=True)
+        carb.log_info(f"  Euler XYZ: [Roll={frd_ned_euler_xyz[0]:7.2f}°, Pitch={frd_ned_euler_xyz[1]:7.2f}°, Yaw={frd_ned_euler_xyz[2]:7.2f}°]")
+
+        carb.log_info("=" * 70 + "\n")
+
+        # All sensor and other state logging commented out until attitude is correct
+        # # Get truth data from vehicle state
+        # pos_ned = self._state.position_ned_m
+        # vel_ned = self._state.velocity_ned_mps
+        # ang_vel = self._state.angular_velocity_frd_rps
+        # body_vel = self._state.body_velocity_frd_mps
+
+        # # Get sensor data if backend exists
+        # imu_data = None
+        # mag_data = None
+        # baro_data = None
+        # gps_data = None
+
+        # if (
+        #     hasattr(self, "_backend")
+        #     and self._backend
+        #     and hasattr(self._backend, "_sensor_data")
+        # ):
+        #     sensor_data = self._backend._sensor_data
+        #     imu_data = (
+        #         sensor_data.imu_state if hasattr(sensor_data, "imu_state") else None
+        #     )
+        #     mag_data = (
+        #         sensor_data.magnetometer_state
+        #         if hasattr(sensor_data, "magnetometer_state")
+        #         else None
+        #     )
+        #     baro_data = (
+        #         sensor_data.barometer_state
+        #         if hasattr(sensor_data, "barometer_state")
+        #         else None
+        #     )
+        #     gps_data = (
+        #         sensor_data.gps_state if hasattr(sensor_data, "gps_state") else None
+        #     )
+
+        # # Truth State
+        # carb.log_info("TRUTH STATE:")
+        # carb.log_info(
+        #     f"  Position NED:     [{pos_ned[0]:8.3f}, {pos_ned[1]:8.3f}, {pos_ned[2]:8.3f}] m"
+        # )
+        # carb.log_info(
+        #     f"  Velocity NED:     [{vel_ned[0]:8.3f}, {vel_ned[1]:8.3f}, {vel_ned[2]:8.3f}] m/s"
+        # )
+        # carb.log_info(
+        #     f"  Body Velocity:    [{body_vel[0]:8.3f}, {body_vel[1]:8.3f}, {body_vel[2]:8.3f}] m/s"
+        # )
+        # carb.log_info(
+        #     f"  Angular Vel FRD:  [{ang_vel[0]:7.4f}, {ang_vel[1]:7.4f}, {ang_vel[2]:7.4f}] rad/s"
+        # )
+
+        # # IMU Data
+        # if imu_data:
+        #     carb.log_info("\nIMU SENSOR:")
+        #     carb.log_info(
+        #         f"  Angular Vel FRD:  [{imu_data.angular_velocity_frd_body_rps[0]:7.4f}, "
+        #         f"{imu_data.angular_velocity_frd_body_rps[1]:7.4f}, "
+        #         f"{imu_data.angular_velocity_frd_body_rps[2]:7.4f}] rad/s"
+        #     )
+        #     carb.log_info(
+        #         f"  Linear Acc FRD:   [{imu_data.linear_acceleration_frd_body_mpss[0]:7.3f}, "
+        #         f"{imu_data.linear_acceleration_frd_body_mpss[1]:7.3f}, "
+        #         f"{imu_data.linear_acceleration_frd_body_mpss[2]:7.3f}] m/s²"
+        #     )
+
+        #     # Calculate errors
+        #     ang_vel_error = [
+        #         imu_data.angular_velocity_frd_body_rps[i] - ang_vel[i] for i in range(3)
+        #     ]
+        #     carb.log_info(
+        #         f"  Δ Angular Vel:    [{ang_vel_error[0]:7.4f}, {ang_vel_error[1]:7.4f}, {ang_vel_error[2]:7.4f}] rad/s"
+        #     )
+
+        # # Magnetometer Analysis
+        # if mag_data:
+        #     carb.log_info("\nMAGNETOMETER SENSOR:")
+        #     carb.log_info(
+        #         f"  Field FRD Body:   [{mag_data.magnetic_field_frd_body_gauss[0]:7.4f}, "
+        #         f"{mag_data.magnetic_field_frd_body_gauss[1]:7.4f}, "
+        #         f"{mag_data.magnetic_field_frd_body_gauss[2]:7.4f}] Gauss"
+        #     )
+        #     carb.log_info(
+        #         f"  Field Magnitude:  {mag_data.magnetic_field_magnitude_gauss:7.4f} Gauss"
+        #     )
+        #     carb.log_info(
+        #         f"  Declination:      {mag_data.magnetic_declination_deg:7.2f}°"
+        #     )
+        #     carb.log_info(
+        #         f"  Inclination:      {mag_data.magnetic_inclination_deg:7.2f}°"
+        #     )
+
+        #     # Calculate heading from magnetometer
+        #     try:
+        #         mag_heading = calculate_magnetic_heading(
+        #             mag_data.magnetic_field_frd_body_gauss,
+        #             np.radians(euler_truth[0]),  # roll
+        #             np.radians(euler_truth[1]),  # pitch
+        #         )
+        #         true_heading = calculate_true_heading(
+        #             mag_heading, np.radians(mag_data.magnetic_declination_deg)
+        #         )
+
+        #         carb.log_info(f"  Magnetic Heading: {np.degrees(mag_heading):7.2f}°")
+        #         carb.log_info(f"  True Heading:     {np.degrees(true_heading):7.2f}°")
+        #         carb.log_info(f"  Truth Yaw:        {euler_truth[2]:7.2f}°")
+        #         carb.log_info(
+        #             f"  Δ Yaw:            {np.degrees(true_heading) - euler_truth[2]:7.2f}°"
+        #         )
+        #     except Exception as e:
+        #         carb.log_warn(f"  Could not calculate heading: {e}")
+
+        # # Barometer Analysis
+        # if baro_data:
+        #     truth_alt = -pos_ned[2]  # NED Z is down, so negate for altitude
+        #     carb.log_info("\nBAROMETER SENSOR:")
+        #     carb.log_info(f"  Pressure:         {baro_data.pressure_pa:9.2f} Pa")
+        #     carb.log_info(f"  Altitude MSL:     {baro_data.altitude_msl_m:8.3f} m")
+        #     carb.log_info(
+        #         f"  Temperature:      {baro_data.temperature_celsius:7.2f} °C"
+        #     )
+        #     carb.log_info(f"  Truth Altitude:   {truth_alt:8.3f} m")
+        #     carb.log_info(
+        #         f"  Δ Altitude:       {baro_data.altitude_msl_m - truth_alt:8.3f} m"
+        #     )
+
+        # # GPS Analysis
+        # if gps_data:
+        #     carb.log_info("\nGPS SENSOR:")
+        #     carb.log_info(
+        #         f"  Position LLA:     [{gps_data.latitude_deg:.8f}°, "
+        #         f"{gps_data.longitude_deg:.8f}°, {gps_data.altitude_msl_m:.3f}m]"
+        #     )
+        #     carb.log_info(
+        #         f"  Velocity NED:     [{gps_data.velocity_north_mps:8.3f}, "
+        #         f"{gps_data.velocity_east_mps:8.3f}, "
+        #         f"{gps_data.velocity_down_mps:8.3f}] m/s"
+        #     )
+        #     carb.log_info(f"  Groundspeed:      {gps_data.ground_speed_mps:8.3f} m/s")
+
+        #     # Calculate velocity errors
+        #     vel_error = [
+        #         gps_data.velocity_north_mps - vel_ned[0],
+        #         gps_data.velocity_east_mps - vel_ned[1],
+        #         gps_data.velocity_down_mps - vel_ned[2],
+        #     ]
+        #     carb.log_info(
+        #         f"  Δ Velocity NED:   [{vel_error[0]:8.3f}, {vel_error[1]:8.3f}, {vel_error[2]:8.3f}] m/s"
+        #     )
+
+        #     # Compare altitudes
+        #     gps_alt_error = gps_data.altitude_msl_m - (-pos_ned[2])
+        #     carb.log_info(f"  Δ Altitude:       {gps_alt_error:8.3f} m")
 
     def update(self, dt: float):
         """

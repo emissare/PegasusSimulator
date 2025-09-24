@@ -132,11 +132,11 @@ except Exception as e:
 print("\n4. ANGULAR VELOCITY TRANSFORMATION")
 print("-" * 40)
 try:
-    from pegasus.simulator.logic.rotations import rot_FLU_body_to_FRD_body
+    from pegasus.simulator.logic.rotations import rot_FLU_to_FRD
 
     # Yaw transformation
     angular_flu = np.array([0, 0, 1.0])
-    angular_frd = rot_FLU_body_to_FRD_body.apply(angular_flu)
+    angular_frd = rot_FLU_to_FRD.apply(angular_flu)
 
     if abs(angular_frd[2] + 1.0) < 0.001:
         print(f"✓ Yaw: FLU=[0,0,1] → FRD=[{angular_frd[0]:.1f},{angular_frd[1]:.1f},{angular_frd[2]:.1f}]")

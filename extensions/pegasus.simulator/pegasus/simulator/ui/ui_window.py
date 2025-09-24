@@ -7,10 +7,8 @@
 
 __all__ = ["WidgetWindow"]
 
-# External packages
 import numpy as np
 
-# Omniverse general API
 import carb
 import omni.ui as ui
 from omni.ui import color as cl
@@ -26,8 +24,6 @@ from pegasus.simulator.params import (
 
 
 class WidgetWindow(ui.Window):
-
-    # Design constants for the widgets
     LABEL_PADDING = 120
     BUTTON_HEIGHT = 50
     GENERAL_SPACING = 5
@@ -162,7 +158,7 @@ class WidgetWindow(ui.Window):
                     with ui.HStack(height=20):
                         ui.Spacer()
                         ui.Label(
-                            "Build: 2025.09.21-v29",
+                            "Build: 2025.09.23-v3",
                             style={"color": 0x808080FF, "font_size": 12},
                         )
                         ui.Spacer()

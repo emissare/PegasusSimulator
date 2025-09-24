@@ -8,8 +8,8 @@ from scipy.spatial.transform import Rotation
 from typing import Dict, Optional, Tuple
 
 from pegasus.simulator.logic.rotations import (
-    rot_FLU_body_to_FRD_body,
-    rot_FLU_inertial_to_NED_inertial
+    rot_FLU_to_FRD,
+    rot_NWU_to_NED
 )
 from pegasus.simulator.logic.sensors.geo_mag_utils import (
     get_mag_declination,
@@ -63,8 +63,8 @@ def calculate_magnetometer_measurements(
     magnetic_field_ned = np.array([X, Y, Z])
 
     # Transform from NED to FLU inertial (inverse of FLU to NED)
-    # Since rot_FLU_inertial_to_NED_inertial is 180° around X, its inverse is itself
-    magnetic_field_flu = rot_FLU_inertial_to_NED_inertial.inv().apply(magnetic_field_ned)
+    # Since rot_NWU_to_NED is 180° around X, its inverse is itself
+    magnetic_field_flu = rot_NWU_to_NED.inv().apply(magnetic_field_ned)
 
     # Get the attitude rotation
     attitude_flu_flu = Rotation.from_quat(attitude_flu)
@@ -74,7 +74,7 @@ def calculate_magnetometer_measurements(
     magnetic_field_flu_body = attitude_flu_flu.inv().apply(magnetic_field_flu)
 
     # Then from FLU body to FRD body
-    magnetic_field_frd_body = rot_FLU_body_to_FRD_body.apply(magnetic_field_flu_body)
+    magnetic_field_frd_body = rot_FLU_to_FRD.apply(magnetic_field_flu_body)
 
     # Add noise and bias
     if noise_params and 'noise' in noise_params:

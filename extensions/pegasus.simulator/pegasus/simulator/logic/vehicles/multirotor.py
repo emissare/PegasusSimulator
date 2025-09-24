@@ -189,6 +189,10 @@ class Multirotor(Vehicle):
         # Create main body
         self._create_body(stage_prefix)
 
+        # Add orientation indicator (shows forward direction)
+        body_config = self.vehicle_config["vehicle"]["body"]
+        self._create_orientation_indicator(stage_prefix, body_config["dimensions"])
+
         # Create rotors
         for i, (pos, direction) in enumerate(zip(rotor_positions, rotor_directions)):
             self._create_rotor(stage_prefix, i, pos, direction)
@@ -199,6 +203,44 @@ class Multirotor(Vehicle):
 
         # Setup articulation root after all structure is created
         self._setup_articulation(stage_prefix)
+
+    def _create_orientation_indicator(self, stage_prefix: str, body_dimensions: list):
+        """
+        Create a visual indicator to show the forward direction of the vehicle.
+        This is a bright colored cone pointing forward (along +X axis).
+        """
+        from omni.usd import get_context
+        stage = get_context().get_stage()
+
+        # Create indicator as child of body_mesh (the actual moving rigid body)
+        # The body_mesh is what actually moves, not the body container
+        indicator_path = f"{stage_prefix}/body/body_mesh/forward_indicator"
+        indicator_xform = UsdGeom.Xform.Define(stage, indicator_path)
+
+        # Position at front of body, on top surface
+        # dimensions is [x_length, y_width, z_height]
+        x_pos = body_dimensions[0] / 2.0 + 0.2  # Front edge + 20cm forward
+        z_pos = -body_dimensions[2] / 2.0  # On top surface (negative Z is up in FRD)
+        indicator_xform.AddTranslateOp().Set(Gf.Vec3d(x_pos, 0.0, z_pos))
+
+        # Create cone shape
+        cone_path = f"{indicator_path}/cone"
+        cone = UsdGeom.Cone.Define(stage, cone_path)
+
+        # Set cone properties - much larger for visibility
+        cone.CreateHeightAttr(0.4)  # 40cm long (10x larger)
+        cone.CreateRadiusAttr(0.15)  # 15cm radius at base (10x larger)
+
+        # Rotate cone to point forward (along +X)
+        # Default cone points up (+Z), we need it to point forward (+X)
+        # This is a 90-degree rotation around Y-axis
+        cone.AddRotateXYZOp().Set(Gf.Vec3d(0, 90, 0))
+
+        # Make it bright orange for visibility
+        cone.CreateDisplayColorAttr([(1.0, 0.5, 0.0)])  # Bright orange
+
+        # No physics - this is purely visual
+        # No collision - doesn't interact with environment
 
     def _create_body(self, stage_prefix: str):
         """
@@ -322,9 +364,12 @@ class Multirotor(Vehicle):
         # Apply blade-like scaling (long, narrow, thin)
         rotor_geom.AddScaleOp().Set(Gf.Vec3d(1.0, 0.15, 0.02))
 
-        # Apply dark gray color
+        # Apply color - make front rotors green for orientation
         if hasattr(rotor_geom, "CreateDisplayColorAttr"):
-            rotor_geom.CreateDisplayColorAttr([(0.2, 0.2, 0.2)])  # Dark gray
+            if rotor_index in [0, 1]:  # Front rotors
+                rotor_geom.CreateDisplayColorAttr([(0.0, 0.8, 0.0)])  # Bright green
+            else:  # Rear rotors
+                rotor_geom.CreateDisplayColorAttr([(0.2, 0.2, 0.2)])  # Dark gray
 
         # NO physics applied to visual - pure mesh only!
         # Rotation applied to container, scale applied to mesh - no interference!
@@ -598,10 +643,6 @@ class Multirotor(Vehicle):
         # Update backend
         if self._backend:
             self._backend.update(dt)
-
-    # ===============================================================
-    # ---- Component Registration and Access Methods ----
-    # ===============================================================
 
     def _register_components(self):
         """Register all multirotor components for standardized access."""

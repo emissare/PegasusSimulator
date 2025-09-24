@@ -244,11 +244,11 @@ def test_gps_velocity_west():
 
 def test_angular_velocity_transformation():
     """Test angular velocity transformations."""
-    from pegasus.simulator.logic.rotations import rot_FLU_body_to_FRD_body
+    from pegasus.simulator.logic.rotations import rot_FLU_to_FRD
 
     # Test yaw transformation (Z axis)
     angular_flu = np.array([0, 0, 1.0])
-    angular_frd = rot_FLU_body_to_FRD_body.apply(angular_flu)
+    angular_frd = rot_FLU_to_FRD.apply(angular_flu)
 
     if abs(angular_frd[2] + 1.0) > 0.001:  # Should flip sign
         raise AssertionError(f"Yaw should flip sign in FRD, got {angular_frd[2]:.3f}")

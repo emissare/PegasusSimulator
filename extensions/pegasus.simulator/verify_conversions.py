@@ -18,7 +18,7 @@ print("   X = North")
 print("   Y = East")
 print("   Z = Down")
 
-print("\n3. ENU (Geographic/reprojection):")
+print("\n3. ENU (Geographic/geodetic conversion):")
 print("   X = East")
 print("   Y = North")
 print("   Z = Up")

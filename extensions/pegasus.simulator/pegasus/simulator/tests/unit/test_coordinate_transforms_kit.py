@@ -140,25 +140,25 @@ class TestCoordinateTransforms(omni.kit.test.AsyncTestCase):
 
     async def test_angular_velocity_transformation(self):
         """Test angular velocity transformation from FLU to FRD."""
-        from pegasus.simulator.logic.rotations import rot_FLU_body_to_FRD_body
+        from pegasus.simulator.logic.rotations import rot_FLU_to_FRD
 
         # Test roll (X axis)
         angular_flu = np.array([1.0, 0, 0])
-        angular_frd = rot_FLU_body_to_FRD_body.apply(angular_flu)
+        angular_frd = rot_FLU_to_FRD.apply(angular_flu)
         self.assertAlmostEqual(angular_frd[0], 1.0, places=5)  # Roll unchanged
         self.assertAlmostEqual(angular_frd[1], 0.0, places=5)
         self.assertAlmostEqual(angular_frd[2], 0.0, places=5)
 
         # Test pitch (Y axis)
         angular_flu = np.array([0, 1.0, 0])
-        angular_frd = rot_FLU_body_to_FRD_body.apply(angular_flu)
+        angular_frd = rot_FLU_to_FRD.apply(angular_flu)
         self.assertAlmostEqual(angular_frd[0], 0.0, places=5)
         self.assertAlmostEqual(angular_frd[1], -1.0, places=5)  # Pitch flips
         self.assertAlmostEqual(angular_frd[2], 0.0, places=5)
 
         # Test yaw (Z axis)
         angular_flu = np.array([0, 0, 1.0])
-        angular_frd = rot_FLU_body_to_FRD_body.apply(angular_flu)
+        angular_frd = rot_FLU_to_FRD.apply(angular_flu)
         self.assertAlmostEqual(angular_frd[0], 0.0, places=5)
         self.assertAlmostEqual(angular_frd[1], 0.0, places=5)
         self.assertAlmostEqual(angular_frd[2], -1.0, places=5)  # Yaw flips

@@ -228,8 +228,8 @@ class UIDelegate:
                     stage_prefix="/World/quadrotor",
                     config_file=VEHICLES[selected_vehicle],
                     vehicle_id=self._vehicle_id,
-                    init_pos=pos,
-                    init_orientation=Rotation.from_euler("XYZ", euler_angles, degrees=True).as_quat(),
+                    init_pos_enu_m=pos,
+                    init_orientation_quat_xyzw=Rotation.from_euler("XYZ", euler_angles, degrees=True).as_quat(),
                 )
 
             # Log that a vehicle of the type multirotor was spawned in the world via the extension UI

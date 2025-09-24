@@ -6,8 +6,8 @@ No dependencies on Isaac Sim or State class.
 import numpy as np
 from typing import Dict, Optional, Tuple
 
-from pegasus.simulator.logic.rotations import rot_FLU_inertial_to_NED_inertial
-from pegasus.simulator.logic.sensors.geo_mag_utils import reprojection
+from pegasus.simulator.logic.rotations import rot_NWU_to_NED
+from pegasus.simulator.logic.sensors.geo_mag_utils import convert_ned_to_geodetic
 
 
 def calculate_gps_measurements(
@@ -45,24 +45,23 @@ def calculate_gps_measurements(
     # Apply noise and bias to position
     pos_with_noise = position_flu + noise_pos + gps_bias
 
-    # Convert FLU directly to ENU for reprojection function
-    # FLU (Front-Left-Up) to ENU (East-North-Up):
-    # ENU_x (East) = -FLU_y (negative Left = East)
-    # ENU_y (North) = FLU_x (Front = North)
-    # ENU_z (Up) = FLU_z (Up = Up)
-    pos_enu_with_noise = np.array([-pos_with_noise[1], pos_with_noise[0], pos_with_noise[2]])
-    pos_enu_gt = np.array([-position_flu[1], position_flu[0], position_flu[2]])
+    # Convert FLU (NWU body frame) to NED for geodetic conversion
+    # FLU is in NWU world frame: X=North, Y=West, Z=Up
+    # NED: X=North, Y=East, Z=Down
+    # NWU to NED: X_ned = X_nwu, Y_ned = -Y_nwu, Z_ned = -Z_nwu
+    pos_ned_with_noise = np.array([pos_with_noise[0], -pos_with_noise[1], -pos_with_noise[2]])
+    pos_ned_gt = np.array([position_flu[0], -position_flu[1], -position_flu[2]])
 
-    # Reproject position to geographic coordinates
-    latitude, longitude = reprojection(
-        pos_enu_with_noise,
+    # Convert NED position to geographic coordinates
+    latitude, longitude = convert_ned_to_geodetic(
+        pos_ned_with_noise,
         np.radians(origin_lat),
         np.radians(origin_lon)
     )
 
     # Also calculate groundtruth position (without noise)
-    latitude_gt, longitude_gt = reprojection(
-        pos_enu_gt,
+    latitude_gt, longitude_gt = convert_ned_to_geodetic(
+        pos_ned_gt,
         np.radians(origin_lat),
         np.radians(origin_lon)
     )
@@ -71,8 +70,9 @@ def calculate_gps_measurements(
     noise_vel = noise_params.get('velocity_noise', np.zeros(3)) if noise_params else np.zeros(3)
     velocity_with_noise = linear_velocity_flu + noise_vel
 
-    # Transform velocity from FLU inertial to NED inertial
-    velocity_ned = rot_FLU_inertial_to_NED_inertial.apply(velocity_with_noise)
+    # Transform velocity from NWU world to NED world
+    # Note: The input is in FLU/NWU frame (Isaac's world frame)
+    velocity_ned = rot_NWU_to_NED.apply(velocity_with_noise)
 
     # Compute ground speed (horizontal speed)
     speed = np.linalg.norm(velocity_with_noise[:2])

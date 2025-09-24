@@ -10,16 +10,16 @@ from scipy.spatial.transform import Rotation
 # ==================== Rotation Fixtures ====================
 
 @pytest.fixture
-def rot_FLU_inertial_to_NED_inertial():
-    """Rotation from FLU inertial frame to NED inertial frame."""
-    # 180° rotation around X-axis
+def rot_NWU_to_NED():
+    """Rotation from NWU world frame to NED world frame."""
+    # 180° rotation around X-axis (North axis)
     return Rotation.from_quat([1.0, 0.0, 0.0, 0.0])
 
 
 @pytest.fixture
-def rot_FLU_body_to_FRD_body():
+def rot_FLU_to_FRD():
     """Rotation from FLU body frame to FRD body frame."""
-    # 180° rotation around X-axis (same as inertial)
+    # 180° rotation around X-axis (Front axis)
     return Rotation.from_quat([1.0, 0.0, 0.0, 0.0])
 
 

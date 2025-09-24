@@ -8,8 +8,7 @@ to a gazebo-based simulation.
 import numpy as np
 
 # Declare which functions are visible from this file
-__all__ = ["get_mag_declination", "get_mag_inclination", "get_mag_strength", "convert_ned_to_geodetic", "GRAVITY_VECTOR",
-           "reprojection"]  # Keep reprojection for backward compatibility (deprecated)
+__all__ = ["get_mag_declination", "get_mag_inclination", "get_mag_strength", "convert_ned_to_geodetic", "GRAVITY_VECTOR"]
 
 # --------------------------------------------------------------------
 # Magnetic field data from WMM2018 (10^5xnanoTesla (N, E D) n-frame )
@@ -168,11 +167,3 @@ def convert_ned_to_geodetic(position_ned_m: np.ndarray, origin_latitude_rad: flo
         longitude_rad = origin_longitude_rad
 
     return latitude_rad, longitude_rad
-
-
-def reprojection(position: np.ndarray, origin_lat=-999, origin_long=-999):
-    """
-    DEPRECATED: Use convert_ned_to_geodetic() instead.
-    Legacy wrapper for backward compatibility.
-    """
-    return convert_ned_to_geodetic(position, origin_lat, origin_long)

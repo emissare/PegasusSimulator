@@ -10,7 +10,7 @@ print("DEBUG GPS COORDINATE TRANSFORMATIONS")
 print("="*60)
 
 # Test the transformation chain
-from pegasus.simulator.logic.rotations import rot_FLU_inertial_to_NED_inertial
+from pegasus.simulator.logic.rotations import rot_NWU_to_NED
 
 # Test 1: 1000m North in FLU (positive X)
 flu_north = np.array([1000, 0, 0])
@@ -18,13 +18,13 @@ print("\nFLU position (1000m North): [1000, 0, 0]")
 
 # Apply FLU to NED transformation
 # Expected: NED should be [1000, 0, 0] (North, East=0, Down=0)
-ned = rot_FLU_inertial_to_NED_inertial.apply(flu_north)
+ned = rot_NWU_to_NED.apply(flu_north)
 print(f"After FLU→NED transform: {ned}")
 print(f"  North (X): {ned[0]:.1f} m")
 print(f"  East (Y): {ned[1]:.1f} m")
 print(f"  Down (Z): {ned[2]:.1f} m")
 
-# Convert NED to ENU for reprojection
+# Convert NED to ENU for geodetic conversion
 # ENU = [East, North, Up] = [NED_y, NED_x, -NED_z]
 enu = np.array([ned[1], ned[0], -ned[2]])
 print(f"After NED→ENU convert: {enu}")
@@ -44,7 +44,7 @@ print("\n" + "-"*40)
 flu_east = np.array([0, -1000, 0])
 print("\nFLU position (1000m East): [0, -1000, 0]")
 
-ned = rot_FLU_inertial_to_NED_inertial.apply(flu_east)
+ned = rot_NWU_to_NED.apply(flu_east)
 print(f"After FLU→NED transform: {ned}")
 print(f"  North (X): {ned[0]:.1f} m")
 print(f"  East (Y): {ned[1]:.1f} m")

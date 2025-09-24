@@ -9,8 +9,8 @@ from typing import Dict, Optional, Tuple
 
 # Import the rotation matrices (these are just scipy Rotation objects)
 from pegasus.simulator.logic.rotations import (
-    rot_FLU_body_to_FRD_body,
-    rot_FLU_inertial_to_NED_inertial
+    rot_FLU_to_FRD,
+    rot_NWU_to_NED
 )
 from pegasus.simulator.logic.sensors.geo_mag_utils import GRAVITY_VECTOR
 
@@ -70,15 +70,15 @@ def calculate_imu_measurements(
     if noise_params and 'accelerometer_noise' in noise_params:
         linear_acceleration_with_noise += noise_params['accelerometer_noise']
 
-    # Transform orientation from FLU/FLU to FRD/NED
-    attitude_flu_flu = Rotation.from_quat(attitude_flu)
-    attitude_frd_ned = rot_FLU_inertial_to_NED_inertial * attitude_flu_flu * rot_FLU_body_to_FRD_body
+    # Transform orientation from FLU/NWU to FRD/NED
+    attitude_flu_nwu = Rotation.from_quat(attitude_flu)
+    attitude_frd_ned = rot_NWU_to_NED * attitude_flu_nwu * rot_FLU_to_FRD
 
     # Transform angular velocity from FLU body to FRD body
-    angular_velocity_frd = rot_FLU_body_to_FRD_body.apply(angular_velocity_with_noise)
+    angular_velocity_frd = rot_FLU_to_FRD.apply(angular_velocity_with_noise)
 
     # Transform linear acceleration from FLU body to FRD body
-    linear_acceleration_frd = rot_FLU_body_to_FRD_body.apply(linear_acceleration_with_noise)
+    linear_acceleration_frd = rot_FLU_to_FRD.apply(linear_acceleration_with_noise)
 
     return {
         "orientation": attitude_frd_ned.as_quat(),

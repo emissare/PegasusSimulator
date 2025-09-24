@@ -12,8 +12,8 @@ from pegasus.simulator.logic.vehicle_state import VehicleState
 from pegasus.simulator.logic.sensors import Sensor
 from pegasus.simulator.logic.sensors.sensor_models import MagnetometerState
 from pegasus.simulator.logic.rotations import (
-    rot_FLU_inertial_to_NED_inertial,
-    rot_FLU_body_to_FRD_body
+    rot_NWU_to_NED,
+    rot_FLU_to_FRD
 )
 from pegasus.simulator.logic.sensors.geo_mag_utils import (
     get_mag_declination,
@@ -112,11 +112,12 @@ class Magnetometer(Sensor):
 
         magnetic_field_inertial: np.ndarray = np.array([X, Y, Z])
 
-        attitude_flu_flu = Rotation.from_quat(state.attitude_flu_quat)
+        # Get attitude from FRD-NED (what VehicleState stores) and convert to what we need
+        # VehicleState stores FRD body in NED world, but we need to apply the magnetic field
+        attitude_frd_ned = Rotation.from_quat(state.attitude_frd_ned_quat)
 
-        rot_body_to_world = rot_FLU_inertial_to_NED_inertial * attitude_flu_flu * rot_FLU_body_to_FRD_body.inv()
-
-        magnetic_field_body = rot_body_to_world.inv().apply(magnetic_field_inertial)
+        # The magnetic field is in NED frame, so we can directly transform it to FRD body frame
+        magnetic_field_body = attitude_frd_ned.inv().apply(magnetic_field_inertial)
 
         tau = self._bias_correlation_time
 

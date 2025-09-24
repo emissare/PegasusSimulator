@@ -114,14 +114,15 @@ class SpinningBody(ForceGenerator):
                 - force_vector: [0, 0, thrust] (thrust along Z-axis)
                 - torque_vector: [0, 0, reaction_torque] (yaw torque)
         """
-        # Aerodynamic thrust force (always upward in rotor frame)
+        # Aerodynamic thrust force (upward in FRD is negative Z)
+        # In FRD: X=Front, Y=Right, Z=Down, so upward thrust is negative Z
         thrust = self.thrust_coefficient * angular_velocity**2
-        force = np.array([0.0, 0.0, thrust])
+        force = np.array([0.0, 0.0, -thrust])
 
         # Motor reaction torque (Newton's 3rd law)
         # When motor spins rotor in one direction, body experiences opposite torque
         motor_torque = self.torque_coefficient * angular_velocity**2
-        reaction_torque = motor_torque * self.spin_direction
+        reaction_torque = -motor_torque * self.spin_direction
 
         torque = np.array([0.0, 0.0, reaction_torque])
 
