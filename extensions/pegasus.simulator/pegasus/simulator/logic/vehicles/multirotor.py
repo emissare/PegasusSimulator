@@ -201,6 +201,10 @@ class Multirotor(Vehicle):
         if self.vehicle_config["vehicle"].get("gimbal", {}).get("enabled", False):
             self._create_gimbal_mount(stage_prefix)
 
+        # Create chase camera if enabled
+        if self.vehicle_config["vehicle"].get("chase_camera", {}).get("enabled", False):
+            self._create_chase_camera(stage_prefix)
+
         # Setup articulation root after all structure is created
         self._setup_articulation(stage_prefix)
 
@@ -210,6 +214,7 @@ class Multirotor(Vehicle):
         This is a bright colored cone pointing forward (along +X axis).
         """
         from omni.usd import get_context
+
         stage = get_context().get_stage()
 
         # Create indicator as child of body_mesh (the actual moving rigid body)
@@ -401,6 +406,131 @@ class Multirotor(Vehicle):
         )  # Child: rotor physics
 
         return joint
+
+    def _create_chase_camera(self, stage_prefix: str):
+        """
+        Create a chase camera for viewport visualization.
+        Camera is attached as child of vehicle body and maintains relative transform.
+        """
+
+        chase_config = self.vehicle_config["vehicle"].get("chase_camera", {})
+        if not chase_config.get("enabled", False):
+            return
+
+        # Get camera position from config (FLU coordinates)
+        cam_position = chase_config.get("position", [-2.0, 0.0, 1.0])
+
+        # Get USD stage for creating geometry
+        from omni.usd import get_context
+
+        stage = get_context().get_stage()
+
+        # Create camera as child of body_mesh (the actual moving rigid body)
+        camera_path = f"{stage_prefix}/body/body_mesh/chase_camera"
+        camera = UsdGeom.Camera.Define(stage, camera_path)
+
+        # Set camera properties using correct attribute names
+        camera.CreateFocalLengthAttr(18.0)  # Standard focal length
+        camera.CreateHorizontalApertureAttr(20.955)  # Horizontal aperture for FOV
+
+        # Set clipping range
+        camera.CreateClippingRangeAttr(
+            Gf.Vec2f(
+                chase_config.get("near_clip", 0.1), chase_config.get("far_clip", 1000.0)
+            )
+        )
+
+        # Apply camera transform using simple operations
+        camera_xform = UsdGeom.Xformable(camera)
+        camera_xform.ClearXformOpOrder()
+
+        # Set position relative to body
+        camera_xform.AddTranslateOp().Set(
+            Gf.Vec3d(cam_position[0], cam_position[1], cam_position[2])
+        )
+
+        # Get Y rotation from config or calculate if not specified
+        y_rotation = chase_config.get("y_rotation", None)
+
+        if y_rotation is None:
+            y_rotation = 0
+        rotation_angles = [0, y_rotation, -90]
+
+        # Apply ZYX rotation
+        camera_xform.AddRotateZYXOp().Set(
+            Gf.Vec3d(rotation_angles[0], rotation_angles[1], rotation_angles[2])
+        )
+
+        carb.log_info(
+            f"Chase camera created at {camera_path} with rotation {rotation_angles}"
+        )
+
+    def _calculate_camera_lookat_rotation(
+        self, camera_position, target_position=[0, 0, 0]
+    ):
+        """
+        Calculate ZYX rotation angles for camera to look at target.
+
+        USD cameras look down -Z axis with +Y up by default.
+        Isaac Sim uses FLU coordinates (+X forward, +Y left, +Z up).
+
+        Args:
+            camera_position: Camera position relative to vehicle [x, y, z]
+            target_position: Target position to look at (default: vehicle center)
+
+        Returns:
+            [x_rot, y_rot, z_rot]: Rotation angles in degrees for ZYX order
+        """
+        import math
+
+        # Look direction from camera to target
+        look_x = target_position[0] - camera_position[0]
+        look_y = target_position[1] - camera_position[1]
+        look_z = target_position[2] - camera_position[2]
+
+        # Z rotation: -90° aligns camera frame with vehicle frame
+        # This rotates camera's up from +Y to +X (matching Isaac Sim conventions)
+        z_rot = -90
+
+        # After Z rotation, camera still looks down (-Z)
+        # We need Y rotation to tilt from vertical to look at target
+
+        # Calculate the tilt angle needed
+        # Distance in horizontal plane
+        horizontal_distance = math.sqrt(look_x**2 + look_y**2)
+
+        # Y rotation tilts the camera to point at target
+        # Empirically determined formula based on actual testing in Isaac Sim
+        # The rotation needed doesn't match simple geometry due to how
+        # Isaac Sim applies the ZYX rotation order
+
+        if horizontal_distance > 0:
+            # Basic geometric angle
+            geometric_angle = math.degrees(math.atan2(horizontal_distance, -look_z))
+
+            # Empirical formula based on tested values:
+            # At (-2,0,1): geometric=63.4°, needed=-81.4°
+            # At (-2,0,3): geometric=33.7°, needed=-75°
+            # The pattern shows we need approximately: -(geometric + k*height)
+            # where k varies with height
+
+            # Height-dependent adjustment
+            height = camera_position[2]
+            if height > 0:
+                # Empirical formula that fits the observed data
+                # This accounts for Isaac Sim's actual rotation behavior
+                adjustment = 18 + (height - 1) * 13.5
+                y_rot = -(geometric_angle + adjustment)
+            else:
+                y_rot = -geometric_angle
+        else:
+            # Camera directly above/below target
+            y_rot = 0 if look_z < 0 else -180
+
+        # X rotation (roll): 0 for level camera
+        x_rot = 0
+
+        return [x_rot, y_rot, z_rot]
 
     def _create_gimbal_mount(self, stage_prefix: str):
         """

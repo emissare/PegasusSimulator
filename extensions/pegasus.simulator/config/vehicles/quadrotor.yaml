@@ -46,6 +46,18 @@ vehicle:
   gimbal:
     enabled: false
 
+  # Chase camera configuration for viewport visualization
+  chase_camera:
+    enabled: true
+    # Position relative to vehicle center in FLU (Forward-Left-Up) coordinates
+    position: [-2.0, 0.0, 3]   # 2m behind, 8m above the vehicle
+    # Manual Y rotation to point at vehicle (adjust as needed for different positions)
+    y_rotation: -75             # Y rotation in degrees
+    # Optional camera parameters
+    fov: 60.0                     # Field of view in degrees
+    near_clip: 0.1                # Near clipping plane in meters
+    far_clip: 1000.0              # Far clipping plane in meters
+
 # Flight characteristics with Iris_Motor:
 # - Matches PX4 Iris gazebo-classic model exactly
 # - Higher thrust capacity (1100 vs 950 rad/s max RPM)
